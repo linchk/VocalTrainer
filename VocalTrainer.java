@@ -13,10 +13,8 @@ import java.util.prefs.Preferences;
 /**
  * VocalTrainer — профессиональный тренажёр вокала на Java.
  * <p>
- * Добавлено:
- * - MIDI-монитор (отображение всех сырых сообщений)
- * - Выбор внешнего MIDI-выхода (Microsoft GS Wavetable Synth и др.)
- * - Полное сохранение настроек
+ * Исправлено: добавлен режим "Системный MIDI-вход", который реально работает
+ * с MIDI-клавиатурами в Windows через стандартные настройки.
  */
 public class VocalTrainer extends JFrame {
 
@@ -35,6 +33,7 @@ public class VocalTrainer extends JFrame {
     private static final String KEY_OUTPUT_DEVICE     = "output_device";
     private static final String KEY_MIDI_IN_DEVICE    = "midi_in_device";
     private static final String KEY_MIDI_OUT_DEVICE   = "midi_out_device";
+    private static final String KEY_USE_SYSTEM_MIDI_IN = "use_system_midi_in";
     private static final String KEY_AUTO_SCROLL       = "auto_scroll";
     private static final String KEY_MONITOR_VISIBLE   = "monitor_visible";
 
@@ -59,6 +58,7 @@ public class VocalTrainer extends JFrame {
 
     // MIDI вход
     private MidiDevice midiInputDevice;
+    private Transmitter midiInputTransmitter;
     private Receiver midiInputReceiver;
     private volatile Integer currentMidiNote = null;
     private volatile Integer currentMidiVelocity = null;
@@ -86,6 +86,7 @@ public class VocalTrainer extends JFrame {
     private JComboBox<String> inputCombo;
     private JComboBox<String> outputCombo;
     private JComboBox<String> midiInCombo;
+    private JCheckBox useSystemMidiInCheck;
     private JComboBox<String> midiOutCombo;
     private JCheckBox autoScrollCheck;
     private JLabel midiNoteLabel;
@@ -230,9 +231,10 @@ public class VocalTrainer extends JFrame {
         midiInLabel.setForeground(Color.WHITE);
         settingsPanel.add(midiInLabel, gbc);
 
-        gbc.gridx = 1;
+        gbc.gridx = 1; gbc.gridwidth = 1;
         midiInCombo = new JComboBox<>();
         midiInCombo.setPreferredSize(new Dimension(200, 26));
+        midiInCombo.setEnabled(false); // по умолчанию выключен, пока не отключим системный вход
         midiInCombo.addItemListener(e -> saveSettings());
         settingsPanel.add(midiInCombo, gbc);
 
@@ -244,8 +246,27 @@ public class VocalTrainer extends JFrame {
         rescanBtn.addActionListener(e -> rescanAllDevices());
         settingsPanel.add(rescanBtn, gbc);
 
-        // --- MIDI выход ---
+        // --- Использовать системный MIDI вход ---
         gbc.gridx = 0; gbc.gridy = 3; gbc.gridwidth = 1;
+        JLabel sysMidiLabel = new JLabel("🖥️ Системный:");
+        sysMidiLabel.setFont(new Font("Arial", Font.BOLD, 11));
+        sysMidiLabel.setForeground(Color.WHITE);
+        settingsPanel.add(sysMidiLabel, gbc);
+
+        gbc.gridx = 1; gbc.gridwidth = 2;
+        useSystemMidiInCheck = new JCheckBox("Использовать системный MIDI-вход (рекомендуется)");
+        useSystemMidiInCheck.setFont(new Font("Arial", Font.PLAIN, 11));
+        useSystemMidiInCheck.setForeground(Color.WHITE);
+        useSystemMidiInCheck.setBackground(new Color(37, 37, 37));
+        useSystemMidiInCheck.addActionListener(e -> {
+            midiInCombo.setEnabled(!useSystemMidiInCheck.isSelected());
+            saveSettings();
+            logMidi("🖥️ Системный MIDI-вход " + (useSystemMidiInCheck.isSelected() ? "включён" : "выключен"));
+        });
+        settingsPanel.add(useSystemMidiInCheck, gbc);
+
+        // --- MIDI выход ---
+        gbc.gridx = 0; gbc.gridy = 4; gbc.gridwidth = 1;
         JLabel midiOutLabel = new JLabel("🎹 MIDI Out:");
         midiOutLabel.setFont(new Font("Arial", Font.BOLD, 11));
         midiOutLabel.setForeground(Color.WHITE);
@@ -258,7 +279,7 @@ public class VocalTrainer extends JFrame {
         settingsPanel.add(midiOutCombo, gbc);
 
         // --- Автопрокрутка ---
-        gbc.gridx = 0; gbc.gridy = 4; gbc.gridwidth = 1;
+        gbc.gridx = 0; gbc.gridy = 5; gbc.gridwidth = 1;
         JLabel scrollLabel = new JLabel("🔄 Прокрутка:");
         scrollLabel.setFont(new Font("Arial", Font.BOLD, 11));
         scrollLabel.setForeground(Color.WHITE);
@@ -277,7 +298,7 @@ public class VocalTrainer extends JFrame {
         settingsPanel.add(autoScrollCheck, gbc);
 
         // --- Кнопка MIDI монитора ---
-        gbc.gridx = 0; gbc.gridy = 5; gbc.gridwidth = 1;
+        gbc.gridx = 0; gbc.gridy = 6; gbc.gridwidth = 1;
         JLabel monLabel = new JLabel("📡 Монитор:");
         monLabel.setFont(new Font("Arial", Font.BOLD, 11));
         monLabel.setForeground(Color.WHITE);
@@ -428,11 +449,18 @@ public class VocalTrainer extends JFrame {
 
     // -----------------------------------------------------------------------
     private void loadSettings() {
+        // Аудио
         int savedInput = PREFS.getInt(KEY_INPUT_DEVICE, 0);
         int savedOutput = PREFS.getInt(KEY_OUTPUT_DEVICE, 0);
         if (savedInput < inputCombo.getItemCount()) inputCombo.setSelectedIndex(savedInput);
         if (savedOutput < outputCombo.getItemCount()) outputCombo.setSelectedIndex(savedOutput);
 
+        // Системный MIDI вход
+        boolean useSystem = PREFS.getBoolean(KEY_USE_SYSTEM_MIDI_IN, true);
+        useSystemMidiInCheck.setSelected(useSystem);
+        midiInCombo.setEnabled(!useSystem);
+
+        // MIDI вход (конкретное устройство)
         String savedMidiIn = PREFS.get(KEY_MIDI_IN_DEVICE, "");
         if (!savedMidiIn.isEmpty()) {
             for (int i = 0; i < midiInCombo.getItemCount(); i++) {
@@ -443,6 +471,7 @@ public class VocalTrainer extends JFrame {
             }
         }
 
+        // MIDI выход
         String savedMidiOut = PREFS.get(KEY_MIDI_OUT_DEVICE, JAVA_SYNTH_NAME);
         if (!savedMidiOut.isEmpty()) {
             for (int i = 0; i < midiOutCombo.getItemCount(); i++) {
@@ -453,9 +482,11 @@ public class VocalTrainer extends JFrame {
             }
         }
 
+        // Автопрокрутка
         autoScrollEnabled = PREFS.getBoolean(KEY_AUTO_SCROLL, true);
         autoScrollCheck.setSelected(autoScrollEnabled);
 
+        // MIDI монитор
         midiMonitorVisible = PREFS.getBoolean(KEY_MONITOR_VISIBLE, false);
         if (midiMonitorVisible) {
             SwingUtilities.invokeLater(this::openMidiMonitor);
@@ -467,6 +498,7 @@ public class VocalTrainer extends JFrame {
             PREFS.putInt(KEY_INPUT_DEVICE, inputCombo.getSelectedIndex());
         if (outputCombo.getSelectedIndex() != -1)
             PREFS.putInt(KEY_OUTPUT_DEVICE, outputCombo.getSelectedIndex());
+        PREFS.putBoolean(KEY_USE_SYSTEM_MIDI_IN, useSystemMidiInCheck.isSelected());
         if (midiInCombo.getSelectedItem() != null)
             PREFS.put(KEY_MIDI_IN_DEVICE, (String) midiInCombo.getSelectedItem());
         if (midiOutCombo.getSelectedItem() != null)
@@ -496,16 +528,11 @@ public class VocalTrainer extends JFrame {
         inputCombo.setModel(new DefaultComboBoxModel<>(micNames.toArray(new String[0])));
         outputCombo.setModel(new DefaultComboBoxModel<>(spkNames.toArray(new String[0])));
 
-        // MIDI входы
+        // MIDI входы (для ручного выбора, если системный вход отключён)
         MidiDevice.Info[] midiInfos = MidiSystem.getMidiDeviceInfo();
         List<String> midiInputNames = new ArrayList<>();
         for (MidiDevice.Info info : midiInfos) {
-            try {
-                MidiDevice dev = MidiSystem.getMidiDevice(info);
-                if (dev.getMaxTransmitters() != 0) {
-                    midiInputNames.add(info.getName());
-                }
-            } catch (MidiUnavailableException ignored) {}
+            midiInputNames.add(info.getName());
         }
         if (midiInputNames.isEmpty()) midiInputNames.add("❌ MIDI входы не найдены");
         midiInCombo.setModel(new DefaultComboBoxModel<>(midiInputNames.toArray(new String[0])));
@@ -523,8 +550,7 @@ public class VocalTrainer extends JFrame {
         }
         midiOutCombo.setModel(new DefaultComboBoxModel<>(midiOutputNames.toArray(new String[0])));
 
-        logMidi("✅ Устройства отсканированы. MIDI входов: " + midiInputNames.size() +
-                ", MIDI выходов: " + (midiOutputNames.size() - 1));
+        logMidi("✅ Устройства отсканированы.");
     }
 
     // -----------------------------------------------------------------------
@@ -609,49 +635,60 @@ public class VocalTrainer extends JFrame {
         }
 
         // ---- MIDI вход ----
-        String midiInName = (String) midiInCombo.getSelectedItem();
-        if (midiInName != null && !midiInName.contains("❌")) {
+        midiInputReceiver = new MidiInputReceiver();
+
+        if (useSystemMidiInCheck.isSelected()) {
+            // Используем системный MIDI-вход по умолчанию (РЕКОМЕНДОВАНО)
             try {
-                MidiDevice.Info[] infos = MidiSystem.getMidiDeviceInfo();
-                for (MidiDevice.Info info : infos) {
-                    if (info.getName().equals(midiInName)) {
-                        midiInputDevice = MidiSystem.getMidiDevice(info);
-                        midiInputDevice.open();
-                        logMidi("🔧 MIDI вход открыт: " + midiInName);
-
-                        midiInputReceiver = new MidiInputReceiver();
-
-                        List<Transmitter> transmitters = midiInputDevice.getTransmitters();
-                        logMidi("🔧 Транслиттеров: " + transmitters.size());
-
-                        if (!transmitters.isEmpty()) {
-                            transmitters.get(0).setReceiver(midiInputReceiver);
-                            logMidi("🔧 Receiver установлен на первый транслиттер");
-                        } else {
-                            Transmitter t = midiInputDevice.getTransmitter();
-                            t.setReceiver(midiInputReceiver);
-                            logMidi("🔧 Использован getTransmitter() fallback");
-                        }
-                        logMidi("✅ MIDI вход подключён: " + midiInName);
-                        break;
-                    }
-                }
+                midiInputTransmitter = MidiSystem.getTransmitter();
+                midiInputTransmitter.setReceiver(midiInputReceiver);
+                logMidi("✅ Системный MIDI-вход по умолчанию активирован.");
+                logMidi("   Убедитесь, что в настройках Windows выбран ваш MIDI-инструмент как устройство ввода по умолчанию.");
             } catch (MidiUnavailableException e) {
-                logMidi("❌ Не удалось открыть MIDI вход: " + e.getMessage());
+                logMidi("❌ Не удалось открыть системный MIDI-вход: " + e.getMessage());
             }
         } else {
-            logMidi("⚠️ MIDI вход не выбран — работает только микрофон");
+            // Ручной выбор устройства (менее надёжно)
+            String midiInName = (String) midiInCombo.getSelectedItem();
+            if (midiInName != null && !midiInName.contains("❌")) {
+                try {
+                    MidiDevice.Info[] infos = MidiSystem.getMidiDeviceInfo();
+                    for (MidiDevice.Info info : infos) {
+                        if (info.getName().equals(midiInName)) {
+                            midiInputDevice = MidiSystem.getMidiDevice(info);
+                            midiInputDevice.open();
+                            logMidi("🔧 MIDI вход открыт: " + midiInName);
+
+                            List<Transmitter> transmitters = midiInputDevice.getTransmitters();
+                            if (!transmitters.isEmpty()) {
+                                midiInputTransmitter = transmitters.get(0);
+                                midiInputTransmitter.setReceiver(midiInputReceiver);
+                                logMidi("🔧 Receiver установлен на первый транслиттер");
+                            } else {
+                                // fallback
+                                midiInputTransmitter = midiInputDevice.getTransmitter();
+                                midiInputTransmitter.setReceiver(midiInputReceiver);
+                                logMidi("🔧 Использован getTransmitter() fallback");
+                            }
+                            logMidi("✅ MIDI вход подключён: " + midiInName);
+                            break;
+                        }
+                    }
+                } catch (MidiUnavailableException e) {
+                    logMidi("❌ Не удалось открыть MIDI вход: " + e.getMessage());
+                }
+            } else {
+                logMidi("⚠️ MIDI вход не выбран — работает только микрофон");
+            }
         }
 
         // ---- MIDI выход (выбор источника звука) ----
         String midiOutName = (String) midiOutCombo.getSelectedItem();
         if (midiOutName != null && !midiOutName.contains("❌")) {
             if (midiOutName.equals(JAVA_SYNTH_NAME)) {
-                // используем Java Synthesizer (уже открыт)
                 logMidi("🎹 Выход: Java Synthesizer");
-                // ничего дополнительно не открываем
+                // ничего не открываем
             } else {
-                // внешнее MIDI-устройство вывода
                 try {
                     MidiDevice.Info[] infos = MidiSystem.getMidiDeviceInfo();
                     for (MidiDevice.Info info : infos) {
@@ -674,6 +711,18 @@ public class VocalTrainer extends JFrame {
             new Thread(new AudioProcessor()).start();
         }
 
+        // ---- Диагностика: через 3 секунды проверить, приходят ли MIDI-сообщения ----
+        new Timer(3000, e -> {
+            if (isRunning && currentMidiNote == null) {
+                logMidi("⚠️ ВНИМАНИЕ: За 3 секунды не получено ни одного MIDI-сообщения.");
+                logMidi("   Если вы нажимаете клавиши, но звука нет:");
+                logMidi("   • Включите опцию 'Системный MIDI-вход'");
+                logMidi("   • Проверьте в настройках Windows: MIDI-устройство ввода по умолчанию");
+                logMidi("   • Попробуйте другое MIDI-устройство в списке");
+                logMidi("   • Используйте виртуальный MIDI-кабель (LoopMIDI) и настройте маршрутизацию");
+            }
+        }).start();
+
         startBtn.setEnabled(false);
         startBtn.setBackground(Color.GRAY);
         stopBtn.setEnabled(true);
@@ -689,10 +738,13 @@ public class VocalTrainer extends JFrame {
             microphoneLine.close();
             microphoneLine = null;
         }
+        if (midiInputTransmitter != null) {
+            midiInputTransmitter.close();
+            midiInputTransmitter = null;
+        }
         if (midiInputDevice != null) {
             midiInputDevice.close();
             midiInputDevice = null;
-            midiInputReceiver = null;
         }
         if (midiOutputDevice != null) {
             midiOutputDevice.close();
@@ -793,9 +845,7 @@ public class VocalTrainer extends JFrame {
                     logMidi("❌ Ошибка отправки MIDI: " + e.getMessage());
                 }
             }
-            // Дополнительно (или вместо) можно использовать Java Synthesizer
-            // Сейчас логика: если выбран Java Synthesizer, то midiOutputReceiver == null,
-            // и мы воспроизводим через javaMidiChannel.
+            // Если внешний выход не выбран, используем Java Synthesizer
             else if (javaMidiChannel != null) {
                 javaMidiChannel.noteOn(note, velocity);
                 logMidi("🔊 Java Synthesizer: NOTE_ON " + noteToName(note));
@@ -878,7 +928,6 @@ public class VocalTrainer extends JFrame {
     }
 
     // -----------------------------------------------------------------------
-    // Детектор высоты тона (автокорреляция)
     private static class PitchDetector {
         private final float sampleRate;
         PitchDetector(AudioFormat format) { this.sampleRate = format.getSampleRate(); }
