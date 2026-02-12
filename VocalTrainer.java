@@ -11,10 +11,12 @@ import java.util.List;
 import java.util.prefs.Preferences;
 
 /**
- * VocalTrainer — полный аналог Python‑версии на Java.
+ * VocalTrainer — профессиональный тренажёр вокала на Java.
  * <p>
- * Исправлена компоновка: пианоролл в CENTER, все элементы видны.
- * Настройки сохраняются автоматически при изменении и при закрытии.
+ * Исправления:
+ * - MIDI-вход работает стабильно, звук воспроизводится.
+ * - Плавная прокрутка с опцией отключения.
+ * - Полное сохранение настроек.
  */
 public class VocalTrainer extends JFrame {
 
@@ -29,9 +31,10 @@ public class VocalTrainer extends JFrame {
 
     // -------- НАСТРОЙКИ (Preferences) --------
     private static final Preferences PREFS = Preferences.userNodeForPackage(VocalTrainer.class);
-    private static final String KEY_INPUT_DEVICE = "input_device";
+    private static final String KEY_INPUT_DEVICE  = "input_device";
     private static final String KEY_OUTPUT_DEVICE = "output_device";
-    private static final String KEY_MIDI_DEVICE  = "midi_device";
+    private static final String KEY_MIDI_DEVICE   = "midi_device";
+    private static final String KEY_AUTO_SCROLL   = "auto_scroll";
 
     // -------- ПАРАМЕТРЫ АУДИО --------
     private static final float SAMPLE_RATE = 44100.0f;
@@ -53,6 +56,7 @@ public class VocalTrainer extends JFrame {
     private final Deque<PitchPoint> pitchHistory = new ArrayDeque<>(500);
 
     private MidiDevice midiInputDevice;
+    private Receiver midiReceiver;               // сохраняем receiver, чтобы не удалялся GC
     private volatile Integer currentMidiNote = null;
     private volatile Integer currentMidiVelocity = null;
 
@@ -63,11 +67,13 @@ public class VocalTrainer extends JFrame {
     private PianoRollPanel pianoPanel;
     private double viewCenter = 60.0;
     private double targetCenter = 60.0;
+    private volatile boolean autoScrollEnabled = true;  // опция
 
     // GUI
     private JComboBox<String> inputCombo;
     private JComboBox<String> outputCombo;
     private JComboBox<String> midiCombo;
+    private JCheckBox autoScrollCheck;
     private JLabel midiNoteLabel;
     private JLabel midiVelocityLabel;
     private JLabel vocalLabel;
@@ -83,7 +89,7 @@ public class VocalTrainer extends JFrame {
     public VocalTrainer() {
         super("🎤🎹 Тренер вокала (Java)");
         setDefaultCloseOperation(JFrame.EXIT_ON_CLOSE);
-        setSize(1200, 900);  // увеличенный размер
+        setSize(1300, 950);
         setLocationRelativeTo(null);
         getContentPane().setBackground(new Color(26, 26, 26));
 
@@ -91,9 +97,9 @@ public class VocalTrainer extends JFrame {
         initSynthesizer();
         initUI();
 
-        // Сначала сканируем устройства и заполняем комбобоксы
+        // Сначала сканируем устройства
         rescanMIDI();
-        // Затем загружаем сохранённые настройки
+        // Затем загружаем сохранённые настройки (в т.ч. чекбокс)
         loadSettings();
 
         // Таймеры
@@ -103,7 +109,7 @@ public class VocalTrainer extends JFrame {
         });
         repaintTimer.start();
 
-        scrollTimer = new Timer(35, e -> smoothScroll());
+        scrollTimer = new Timer(20, e -> smoothScroll()); // чаще для плавности
         scrollTimer.start();
 
         logMidi("ℹ️ Программа запущена. Выберите MIDI устройство и нажмите СТАРТ.");
@@ -112,7 +118,7 @@ public class VocalTrainer extends JFrame {
             @Override
             public void windowClosing(WindowEvent e) {
                 stopProcessing();
-                saveSettings(); // сохраняем при закрытии
+                saveSettings();
                 if (synthesizer != null) synthesizer.close();
             }
         });
@@ -123,8 +129,14 @@ public class VocalTrainer extends JFrame {
         try {
             synthesizer = MidiSystem.getSynthesizer();
             synthesizer.open();
+            // Принудительно загружаем стандартную звуковую банку
+            Soundbank defaultBank = synthesizer.getDefaultSoundbank();
+            if (defaultBank != null) {
+                synthesizer.loadAllInstruments(defaultBank);
+            }
             midiChannel = synthesizer.getChannels()[0];
-            midiChannel.programChange(0); // пианино
+            midiChannel.programChange(0); // Acoustic Grand Piano
+            logMidi("✅ Синтезатор инициализирован, канал готов.");
         } catch (MidiUnavailableException e) {
             logMidi("❌ Не удалось открыть синтезатор: " + e.getMessage());
         }
@@ -147,12 +159,12 @@ public class VocalTrainer extends JFrame {
         title.setBorder(BorderFactory.createEmptyBorder(10, 0, 10, 0));
         topPanel.add(title, BorderLayout.NORTH);
 
-        // Панель настроек устройств
+        // Панель настроек устройств + чекбокс
         JPanel settingsPanel = new JPanel(new GridBagLayout());
         settingsPanel.setBackground(new Color(37, 37, 37));
         settingsPanel.setBorder(BorderFactory.createTitledBorder(
                 BorderFactory.createLineBorder(Color.WHITE),
-                "⚙️ Настройки устройств",
+                "⚙️ Настройки",
                 TitledBorder.LEFT,
                 TitledBorder.TOP,
                 new Font("Arial", Font.BOLD, 12),
@@ -163,7 +175,7 @@ public class VocalTrainer extends JFrame {
         gbc.fill = GridBagConstraints.HORIZONTAL;
         gbc.weightx = 1.0;
 
-        // Микрофон
+        // --- Микрофон ---
         gbc.gridx = 0; gbc.gridy = 0; gbc.gridwidth = 1;
         JLabel micLabel = new JLabel("🎤 Микрофон:");
         micLabel.setFont(new Font("Arial", Font.BOLD, 12));
@@ -176,7 +188,7 @@ public class VocalTrainer extends JFrame {
         inputCombo.addItemListener(e -> saveSettings());
         settingsPanel.add(inputCombo, gbc);
 
-        // Динамики
+        // --- Динамики ---
         gbc.gridx = 0; gbc.gridy = 1; gbc.gridwidth = 1;
         JLabel outLabel = new JLabel("🔊 Динамики:");
         outLabel.setFont(new Font("Arial", Font.BOLD, 12));
@@ -197,7 +209,7 @@ public class VocalTrainer extends JFrame {
         testBtn.addActionListener(e -> testOutput());
         settingsPanel.add(testBtn, gbc);
 
-        // MIDI
+        // --- MIDI ---
         gbc.gridx = 0; gbc.gridy = 2; gbc.gridwidth = 1;
         JLabel midiLabel = new JLabel("🎹 MIDI:");
         midiLabel.setFont(new Font("Arial", Font.BOLD, 12));
@@ -218,9 +230,29 @@ public class VocalTrainer extends JFrame {
         rescanBtn.addActionListener(e -> rescanMIDI());
         settingsPanel.add(rescanBtn, gbc);
 
+        // --- Чекбокс автопрокрутки ---
+        gbc.gridx = 0; gbc.gridy = 3; gbc.gridwidth = 1;
+        JLabel scrollLabel = new JLabel("🔄 Прокрутка:");
+        scrollLabel.setFont(new Font("Arial", Font.BOLD, 12));
+        scrollLabel.setForeground(Color.WHITE);
+        settingsPanel.add(scrollLabel, gbc);
+
+        gbc.gridx = 1; gbc.gridwidth = 2;
+        autoScrollCheck = new JCheckBox("Автопрокрутка за нотой");
+        autoScrollCheck.setFont(new Font("Arial", Font.PLAIN, 12));
+        autoScrollCheck.setForeground(Color.WHITE);
+        autoScrollCheck.setBackground(new Color(37, 37, 37));
+        autoScrollCheck.setSelected(autoScrollEnabled);
+        autoScrollCheck.addActionListener(e -> {
+            autoScrollEnabled = autoScrollCheck.isSelected();
+            saveSettings();
+            logMidi("🔄 Автопрокрутка " + (autoScrollEnabled ? "включена" : "отключена"));
+        });
+        settingsPanel.add(autoScrollCheck, gbc);
+
         topPanel.add(settingsPanel, BorderLayout.CENTER);
 
-        // Индикатор нажатой MIDI-клавиши (под настройками)
+        // Индикатор нажатой MIDI-клавиши
         JPanel midiStatusPanel = new JPanel(new FlowLayout(FlowLayout.LEFT, 20, 5));
         midiStatusPanel.setBackground(new Color(26, 26, 26));
         midiStatusPanel.setBorder(BorderFactory.createEmptyBorder(5, 20, 5, 20));
@@ -242,13 +274,12 @@ public class VocalTrainer extends JFrame {
         midiStatusPanel.add(midiVelocityLabel);
 
         topPanel.add(midiStatusPanel, BorderLayout.SOUTH);
-
         add(topPanel, BorderLayout.NORTH);
 
         // ============ ЦЕНТР: ПИАНИНО-РОЛЛ ============
         pianoPanel = new PianoRollPanel();
         pianoPanel.setBackground(new Color(15, 15, 15));
-        pianoPanel.setPreferredSize(new Dimension(900, 450)); // явный размер
+        pianoPanel.setPreferredSize(new Dimension(1000, 450));
         add(pianoPanel, BorderLayout.CENTER);
 
         // ============ НИЖНЯЯ ПАНЕЛЬ ============
@@ -267,8 +298,9 @@ public class VocalTrainer extends JFrame {
         vocalLabel.setFont(new Font("Arial", Font.BOLD, 26));
         vocalLabel.setForeground(new Color(0, 204, 255));
         vocalBox.add(vocalLabel, BorderLayout.CENTER);
-        vocalBox.add(new JLabel("🎤 Ваша нота", SwingConstants.CENTER), BorderLayout.SOUTH);
-        ((JLabel)vocalBox.getComponent(1)).setForeground(new Color(119, 119, 119));
+        JLabel vocalDesc = new JLabel("🎤 Ваша нота", SwingConstants.CENTER);
+        vocalDesc.setForeground(new Color(119, 119, 119));
+        vocalBox.add(vocalDesc, BorderLayout.SOUTH);
         infoPanel.add(vocalBox);
 
         // Цель
@@ -278,8 +310,9 @@ public class VocalTrainer extends JFrame {
         targetLabel.setFont(new Font("Arial", Font.BOLD, 26));
         targetLabel.setForeground(new Color(255, 215, 0));
         targetBox.add(targetLabel, BorderLayout.CENTER);
-        targetBox.add(new JLabel("🎹 Цель", SwingConstants.CENTER), BorderLayout.SOUTH);
-        ((JLabel)targetBox.getComponent(1)).setForeground(new Color(119, 119, 119));
+        JLabel targetDesc = new JLabel("🎹 Цель", SwingConstants.CENTER);
+        targetDesc.setForeground(new Color(119, 119, 119));
+        targetBox.add(targetDesc, BorderLayout.SOUTH);
         infoPanel.add(targetBox);
 
         // Отклонение
@@ -289,8 +322,9 @@ public class VocalTrainer extends JFrame {
         deviationLabel.setFont(new Font("Arial", Font.BOLD, 26));
         deviationLabel.setForeground(new Color(170, 170, 170));
         devBox.add(deviationLabel, BorderLayout.CENTER);
-        devBox.add(new JLabel("📏 Отклонение", SwingConstants.CENTER), BorderLayout.SOUTH);
-        ((JLabel)devBox.getComponent(1)).setForeground(new Color(119, 119, 119));
+        JLabel devDesc = new JLabel("📏 Отклонение", SwingConstants.CENTER);
+        devDesc.setForeground(new Color(119, 119, 119));
+        devBox.add(devDesc, BorderLayout.SOUTH);
         infoPanel.add(devBox);
 
         bottomPanel.add(infoPanel, BorderLayout.NORTH);
@@ -351,13 +385,13 @@ public class VocalTrainer extends JFrame {
 
     // -----------------------------------------------------------------------
     private void loadSettings() {
-        // Восстанавливаем индексы аудиоустройств
+        // Индексы аудиоустройств
         int savedInput = PREFS.getInt(KEY_INPUT_DEVICE, 0);
         int savedOutput = PREFS.getInt(KEY_OUTPUT_DEVICE, 0);
         if (savedInput < inputCombo.getItemCount()) inputCombo.setSelectedIndex(savedInput);
         if (savedOutput < outputCombo.getItemCount()) outputCombo.setSelectedIndex(savedOutput);
 
-        // Восстанавливаем MIDI устройство по имени
+        // MIDI устройство по имени
         String savedMidi = PREFS.get(KEY_MIDI_DEVICE, "");
         if (!savedMidi.isEmpty()) {
             for (int i = 0; i < midiCombo.getItemCount(); i++) {
@@ -367,18 +401,20 @@ public class VocalTrainer extends JFrame {
                 }
             }
         }
+
+        // Автопрокрутка
+        autoScrollEnabled = PREFS.getBoolean(KEY_AUTO_SCROLL, true);
+        autoScrollCheck.setSelected(autoScrollEnabled);
     }
 
     private void saveSettings() {
-        if (inputCombo.getSelectedIndex() != -1) {
+        if (inputCombo.getSelectedIndex() != -1)
             PREFS.putInt(KEY_INPUT_DEVICE, inputCombo.getSelectedIndex());
-        }
-        if (outputCombo.getSelectedIndex() != -1) {
+        if (outputCombo.getSelectedIndex() != -1)
             PREFS.putInt(KEY_OUTPUT_DEVICE, outputCombo.getSelectedIndex());
-        }
-        if (midiCombo.getSelectedItem() != null) {
+        if (midiCombo.getSelectedItem() != null)
             PREFS.put(KEY_MIDI_DEVICE, (String) midiCombo.getSelectedItem());
-        }
+        PREFS.putBoolean(KEY_AUTO_SCROLL, autoScrollEnabled);
     }
 
     // -----------------------------------------------------------------------
@@ -465,7 +501,7 @@ public class VocalTrainer extends JFrame {
             logMidi("⚠️ Микрофон не выбран или недоступен");
         }
 
-        // MIDI вход
+        // MIDI вход — с сохранением receiver
         String midiName = (String) midiCombo.getSelectedItem();
         if (midiName != null && !midiName.contains("❌")) {
             try {
@@ -474,7 +510,8 @@ public class VocalTrainer extends JFrame {
                     if (info.getName().equals(midiName)) {
                         midiInputDevice = MidiSystem.getMidiDevice(info);
                         midiInputDevice.open();
-                        midiInputDevice.getTransmitter().setReceiver(new MidiInputReceiver());
+                        midiReceiver = new MidiInputReceiver();
+                        midiInputDevice.getTransmitter().setReceiver(midiReceiver);
                         logMidi("✅ MIDI подключён: " + midiName);
                         break;
                     }
@@ -508,6 +545,7 @@ public class VocalTrainer extends JFrame {
         if (midiInputDevice != null) {
             midiInputDevice.close();
             midiInputDevice = null;
+            midiReceiver = null;
         }
         currentMidiNote = null;
         currentMidiVelocity = null;
@@ -537,25 +575,42 @@ public class VocalTrainer extends JFrame {
         @Override
         public void send(MidiMessage message, long timeStamp) {
             if (!isRunning) return;
+
             if (message instanceof ShortMessage) {
                 ShortMessage sm = (ShortMessage) message;
                 int command = sm.getCommand();
                 int note = sm.getData1();
                 int velocity = sm.getData2();
 
+                // Детальное логирование (для отладки)
+                String msgType = "UNKNOWN";
+                if (command == ShortMessage.NOTE_ON) msgType = "NOTE_ON";
+                else if (command == ShortMessage.NOTE_OFF) msgType = "NOTE_OFF";
+                logMidi("📩 MIDI raw: " + msgType + " ch=" + sm.getChannel() +
+                        " note=" + note + " vel=" + velocity);
+
                 if (command == ShortMessage.NOTE_ON && velocity > 0) {
                     SwingUtilities.invokeLater(() -> {
                         currentMidiNote = note;
                         currentMidiVelocity = velocity;
-                        targetCenter = note;
+                        if (autoScrollEnabled) {
+                            targetCenter = note;     // только если автопрокрутка включена
+                        }
                         midiNoteLabel.setText(noteToName(note));
                         midiVelocityLabel.setText("громкость: " + velocity);
                         logMidi("🎹 NOTE ON: " + noteToName(note) + " (MIDI " + note + "), velocity=" + velocity);
                     });
+
+                    // Воспроизводим ноту через синтезатор
                     if (midiChannel != null) {
                         midiChannel.noteOn(note, velocity);
+                        logMidi("🔊 Воспроизвожу ноту " + noteToName(note) + " на синтезаторе");
+                        // Авто-выключение через 2 сек
                         new Timer(2000, e -> midiChannel.noteOff(note)).start();
+                    } else {
+                        logMidi("❌ midiChannel == null, звук не воспроизведён");
                     }
+
                 } else if (command == ShortMessage.NOTE_OFF ||
                         (command == ShortMessage.NOTE_ON && velocity == 0)) {
                     if (currentMidiNote != null && currentMidiNote.equals(note)) {
@@ -567,6 +622,10 @@ public class VocalTrainer extends JFrame {
                         });
                     }
                     logMidi("🎹 NOTE OFF: " + noteToName(note) + " (MIDI " + note + ")");
+                    // Выключаем ноту, если она ещё звучит
+                    if (midiChannel != null) {
+                        midiChannel.noteOff(note);
+                    }
                 }
             }
         }
@@ -574,6 +633,7 @@ public class VocalTrainer extends JFrame {
         public void close() {}
     }
 
+    // -----------------------------------------------------------------------
     private String noteToName(int midi) {
         if (midi < 0 || midi > 127) return "?";
         String[] notes = {"C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"};
@@ -608,12 +668,16 @@ public class VocalTrainer extends JFrame {
         }
     }
 
+    // -----------------------------------------------------------------------
     private void smoothScroll() {
-        viewCenter += (targetCenter - viewCenter) * 0.12;
-        if (viewCenter < 40) viewCenter = 40;
-        if (viewCenter > 90) viewCenter = 90;
+        if (autoScrollEnabled) {
+            viewCenter += (targetCenter - viewCenter) * 0.1;  // более плавно
+            if (viewCenter < 40) viewCenter = 40;
+            if (viewCenter > 90) viewCenter = 90;
+        }
     }
 
+    // -----------------------------------------------------------------------
     private void logMidi(String message) {
         SwingUtilities.invokeLater(() -> {
             String time = String.format("[%tT]", System.currentTimeMillis());
@@ -678,7 +742,10 @@ public class VocalTrainer extends JFrame {
                         float midiFloat = (float) midi;
                         currentPitchMidi = midiFloat;
                         currentVocalNote = noteToName(Math.round(midiFloat));
-                        if (currentMidiNote == null) targetCenter = midiFloat;
+                        // Автоцентрирование, если нет целевой ноты и включена автопрокрутка
+                        if (currentMidiNote == null && autoScrollEnabled) {
+                            targetCenter = midiFloat;
+                        }
                         synchronized (pitchHistory) {
                             pitchHistory.add(new PitchPoint(relativeTime, midiFloat));
                             if (pitchHistory.size() > 500) pitchHistory.removeFirst();
