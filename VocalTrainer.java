@@ -23,12 +23,13 @@ public class VocalTrainer extends JFrame {
 
     // -------- НАСТРОЙКИ (Preferences) --------
     private static final Preferences PREFS = Preferences.userNodeForPackage(VocalTrainer.class);
-    private static final String KEY_INPUT_DEVICE  = "input_device";
-    private static final String KEY_OUTPUT_DEVICE = "output_device";
-    private static final String KEY_MIDI_IN_DEVICE   = "midi_in_device";
-    private static final String KEY_MIDI_OUT_DEVICE  = "midi_out_device";
-    private static final String KEY_AUTO_SCROLL   = "auto_scroll";
-    private static final String KEY_OUTPUT_MODE   = "output_mode";
+    private static final String KEY_INPUT_DEVICE      = "input_device";
+    private static final String KEY_OUTPUT_DEVICE     = "output_device";
+    private static final String KEY_MIDI_IN_DEVICE    = "midi_in_device";
+    private static final String KEY_MIDI_OUT_DEVICE   = "midi_out_device";
+    private static final String KEY_AUTO_SCROLL       = "auto_scroll";
+    private static final String KEY_OUTPUT_MODE       = "output_mode";
+    private static final String KEY_DETAILED_LOG      = "detailed_log";
 
     // -------- ПАРАМЕТРЫ АУДИО --------
     private static final float SAMPLE_RATE = 44100.0f;
@@ -77,6 +78,7 @@ public class VocalTrainer extends JFrame {
     private JRadioButton synthOutRadio;
     private ButtonGroup outGroup;
     private JCheckBox autoScrollCheck;
+    private JCheckBox detailedLogCheck;   // новый флажок
     private JLabel midiNoteLabel;
     private JLabel midiVelocityLabel;
     private JLabel vocalLabel;
@@ -84,6 +86,8 @@ public class VocalTrainer extends JFrame {
     private JLabel deviationLabel;
     private JTextArea midiLogArea;
     private JButton startBtn, stopBtn;
+    private JButton toggleSettingsBtn;
+    private JPanel settingsPanel;
 
     private Timer repaintTimer;
     private Timer scrollTimer;
@@ -162,6 +166,7 @@ public class VocalTrainer extends JFrame {
     private void initUI() {
         setLayout(new BorderLayout(10, 10));
 
+        // ============ ВЕРХНЯЯ ПАНЕЛЬ ============
         JPanel topPanel = new JPanel(new BorderLayout());
         topPanel.setBackground(new Color(26, 26, 26));
 
@@ -173,11 +178,26 @@ public class VocalTrainer extends JFrame {
         title.setBorder(BorderFactory.createEmptyBorder(10, 0, 10, 0));
         topPanel.add(title, BorderLayout.NORTH);
 
-        JPanel settingsPanel = new JPanel(new GridBagLayout());
+        // Кнопка сворачивания настроек
+        toggleSettingsBtn = new JButton("⚙️ Настройки");
+        toggleSettingsBtn.setFont(new Font("Arial", Font.BOLD, 14));
+        toggleSettingsBtn.setBackground(new Color(60, 60, 60));
+        toggleSettingsBtn.setForeground(Color.WHITE);
+        toggleSettingsBtn.setFocusPainted(false);
+        toggleSettingsBtn.addActionListener(e -> {
+            settingsPanel.setVisible(!settingsPanel.isVisible());
+            toggleSettingsBtn.setText(settingsPanel.isVisible() ? "▲ Скрыть настройки" : "⚙️ Настройки");
+        });
+        topPanel.add(toggleSettingsBtn, BorderLayout.SOUTH);
+
+        add(topPanel, BorderLayout.NORTH);
+
+        // ============ ПАНЕЛЬ НАСТРОЕК ============
+        settingsPanel = new JPanel(new GridBagLayout());
         settingsPanel.setBackground(new Color(37, 37, 37));
         settingsPanel.setBorder(BorderFactory.createTitledBorder(
                 BorderFactory.createLineBorder(Color.WHITE),
-                "⚙️ Настройки",
+                "⚙️ Настройки устройств",
                 TitledBorder.LEFT,
                 TitledBorder.TOP,
                 new Font("Arial", Font.BOLD, 12),
@@ -217,8 +237,9 @@ public class VocalTrainer extends JFrame {
         gbc.gridx = 2;
         JButton testAudioBtn = new JButton("🔊 Тест");
         testAudioBtn.setFont(new Font("Arial", Font.BOLD, 11));
-        testAudioBtn.setBackground(new Color(85, 85, 85));
-        testAudioBtn.setForeground(Color.WHITE);
+        testAudioBtn.setBackground(new Color(200, 200, 200));
+        testAudioBtn.setForeground(new Color(30, 30, 30));
+        testAudioBtn.setFocusPainted(false);
         testAudioBtn.addActionListener(e -> testAudioOutput());
         settingsPanel.add(testAudioBtn, gbc);
 
@@ -238,8 +259,9 @@ public class VocalTrainer extends JFrame {
         gbc.gridx = 2;
         JButton rescanBtn = new JButton("🔄 Обновить");
         rescanBtn.setFont(new Font("Arial", Font.BOLD, 11));
-        rescanBtn.setBackground(new Color(68, 68, 68));
-        rescanBtn.setForeground(Color.WHITE);
+        rescanBtn.setBackground(new Color(200, 200, 200));
+        rescanBtn.setForeground(new Color(30, 30, 30));
+        rescanBtn.setFocusPainted(false);
         rescanBtn.addActionListener(e -> rescanDevices());
         settingsPanel.add(rescanBtn, gbc);
 
@@ -287,8 +309,9 @@ public class VocalTrainer extends JFrame {
         gbc.gridx = 2;
         JButton testMidiBtn = new JButton("🎹 Тест MIDI");
         testMidiBtn.setFont(new Font("Arial", Font.BOLD, 11));
-        testMidiBtn.setBackground(new Color(85, 85, 85));
-        testMidiBtn.setForeground(Color.WHITE);
+        testMidiBtn.setBackground(new Color(200, 200, 200));
+        testMidiBtn.setForeground(new Color(30, 30, 30));
+        testMidiBtn.setFocusPainted(false);
         testMidiBtn.addActionListener(e -> testMidiOutput());
         settingsPanel.add(testMidiBtn, gbc);
 
@@ -312,46 +335,40 @@ public class VocalTrainer extends JFrame {
         });
         settingsPanel.add(autoScrollCheck, gbc);
 
-        topPanel.add(settingsPanel, BorderLayout.CENTER);
+        // Подробный лог
+        gbc.gridx = 0; gbc.gridy = 6; gbc.gridwidth = 1;
+        JLabel logLabel = new JLabel("📋 Лог:");
+        logLabel.setFont(new Font("Arial", Font.BOLD, 12));
+        logLabel.setForeground(Color.WHITE);
+        settingsPanel.add(logLabel, gbc);
 
-        // Индикатор нажатой MIDI-клавиши
-        JPanel midiStatusPanel = new JPanel(new FlowLayout(FlowLayout.LEFT, 20, 5));
-        midiStatusPanel.setBackground(new Color(26, 26, 26));
-        midiStatusPanel.setBorder(BorderFactory.createEmptyBorder(5, 20, 5, 20));
+        gbc.gridx = 1; gbc.gridwidth = 2;
+        detailedLogCheck = new JCheckBox("Подробный лог MIDI");
+        detailedLogCheck.setFont(new Font("Arial", Font.PLAIN, 12));
+        detailedLogCheck.setForeground(Color.WHITE);
+        detailedLogCheck.setBackground(new Color(37, 37, 37));
+        detailedLogCheck.addActionListener(e -> saveSettings());
+        settingsPanel.add(detailedLogCheck, gbc);
 
-        JLabel midiStatusTitle = new JLabel("🎹 Нажата клавиша:");
-        midiStatusTitle.setFont(new Font("Arial", Font.BOLD, 14));
-        midiStatusTitle.setForeground(new Color(255, 215, 0));
-        midiStatusPanel.add(midiStatusTitle);
-
-        midiNoteLabel = new JLabel("—");
-        midiNoteLabel.setFont(new Font("Arial", Font.BOLD, 28));
-        midiNoteLabel.setForeground(new Color(255, 215, 0));
-        midiNoteLabel.setPreferredSize(new Dimension(100, 40));
-        midiStatusPanel.add(midiNoteLabel);
-
-        midiVelocityLabel = new JLabel("громкость: —");
-        midiVelocityLabel.setFont(new Font("Arial", Font.PLAIN, 14));
-        midiVelocityLabel.setForeground(new Color(170, 170, 170));
-        midiStatusPanel.add(midiVelocityLabel);
-
-        topPanel.add(midiStatusPanel, BorderLayout.SOUTH);
-        add(topPanel, BorderLayout.NORTH);
-
-        // Пианино-ролл
+        // ============ ЦЕНТРАЛЬНАЯ ОБЛАСТЬ ============
+        JPanel centerArea = new JPanel(new BorderLayout());
+        centerArea.add(settingsPanel, BorderLayout.NORTH);
         pianoPanel = new PianoRollPanel();
         pianoPanel.setBackground(new Color(15, 15, 15));
         pianoPanel.setPreferredSize(new Dimension(1000, 450));
-        add(pianoPanel, BorderLayout.CENTER);
+        centerArea.add(pianoPanel, BorderLayout.CENTER);
+        add(centerArea, BorderLayout.CENTER);
 
-        // Нижняя панель
+        // ============ НИЖНЯЯ ПАНЕЛЬ ============
         JPanel bottomPanel = new JPanel(new BorderLayout());
         bottomPanel.setBackground(new Color(26, 26, 26));
 
+        // Индикаторы вокала, цели, отклонения
         JPanel infoPanel = new JPanel(new FlowLayout(FlowLayout.CENTER, 30, 10));
         infoPanel.setBackground(new Color(26, 26, 26));
         infoPanel.setBorder(BorderFactory.createEmptyBorder(10, 20, 10, 20));
 
+        // Ваша нота
         JPanel vocalBox = new JPanel(new BorderLayout());
         vocalBox.setBackground(new Color(26, 26, 26));
         vocalLabel = new JLabel("—", SwingConstants.CENTER);
@@ -363,6 +380,7 @@ public class VocalTrainer extends JFrame {
         vocalBox.add(vocalDesc, BorderLayout.SOUTH);
         infoPanel.add(vocalBox);
 
+        // Цель
         JPanel targetBox = new JPanel(new BorderLayout());
         targetBox.setBackground(new Color(26, 26, 26));
         targetLabel = new JLabel("—", SwingConstants.CENTER);
@@ -374,6 +392,7 @@ public class VocalTrainer extends JFrame {
         targetBox.add(targetDesc, BorderLayout.SOUTH);
         infoPanel.add(targetBox);
 
+        // Отклонение
         JPanel devBox = new JPanel(new BorderLayout());
         devBox.setBackground(new Color(26, 26, 26));
         deviationLabel = new JLabel("—", SwingConstants.CENTER);
@@ -487,6 +506,9 @@ public class VocalTrainer extends JFrame {
 
         autoScrollEnabled = PREFS.getBoolean(KEY_AUTO_SCROLL, true);
         autoScrollCheck.setSelected(autoScrollEnabled);
+
+        boolean detailedLog = PREFS.getBoolean(KEY_DETAILED_LOG, true);
+        detailedLogCheck.setSelected(detailedLog);
     }
 
     private void saveSettings() {
@@ -500,6 +522,7 @@ public class VocalTrainer extends JFrame {
             PREFS.put(KEY_MIDI_OUT_DEVICE, (String) midiOutCombo.getSelectedItem());
         PREFS.put(KEY_OUTPUT_MODE, physicalOutRadio.isSelected() ? "physical" : "synth");
         PREFS.putBoolean(KEY_AUTO_SCROLL, autoScrollEnabled);
+        PREFS.putBoolean(KEY_DETAILED_LOG, detailedLogCheck.isSelected());
     }
 
     // -----------------------------------------------------------------------
@@ -824,8 +847,9 @@ public class VocalTrainer extends JFrame {
 
         @Override
         public void send(MidiMessage message, long timeStamp) {
-            // Логируем входящее сообщение
-            if (message instanceof ShortMessage) {
+            // Логируем входящее сообщение, если включён подробный лог
+            boolean detailedLog = detailedLogCheck.isSelected();
+            if (detailedLog && message instanceof ShortMessage) {
                 ShortMessage sm = (ShortMessage) message;
                 int command = sm.getCommand();
                 int note = sm.getData1();
@@ -842,18 +866,20 @@ public class VocalTrainer extends JFrame {
             if (isRunning && outputReceiver != null) {
                 try {
                     outputReceiver.send(message, timeStamp);
-                    if (message instanceof ShortMessage && ((ShortMessage) message).getCommand() == ShortMessage.NOTE_ON) {
+                    if (detailedLog && message instanceof ShortMessage && ((ShortMessage) message).getCommand() == ShortMessage.NOTE_ON) {
                         logMidi("🔊 Перенаправлено на выход");
                     }
                 } catch (IllegalStateException e) {
                     logMidi("❌ Ошибка отправки: receiver закрыт");
                 }
             } else {
-                if (!isRunning) logMidi("⏸️ Пропущено: isRunning=false");
-                if (outputReceiver == null) logMidi("⏸️ Пропущено: outputReceiver=null");
+                if (detailedLog) {
+                    if (!isRunning) logMidi("⏸️ Пропущено: isRunning=false");
+                    if (outputReceiver == null) logMidi("⏸️ Пропущено: outputReceiver=null");
+                }
             }
 
-            // Обновляем GUI для NOTE_ON/OFF
+            // Обновляем GUI для NOTE_ON/OFF (всегда, независимо от detailedLog)
             if (isRunning && message instanceof ShortMessage) {
                 ShortMessage sm = (ShortMessage) message;
                 int command = sm.getCommand();
@@ -869,6 +895,7 @@ public class VocalTrainer extends JFrame {
                         }
                         midiNoteLabel.setText(noteToName(note));
                         midiVelocityLabel.setText("громкость: " + velocity);
+                        // Логируем кратко, даже если detailedLog выключен, чтобы видеть нажатия
                         logMidi("🎹 NOTE ON: " + noteToName(note) + " (MIDI " + note + "), velocity=" + velocity);
                     });
                 } else if (command == ShortMessage.NOTE_OFF ||
