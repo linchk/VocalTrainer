@@ -13,10 +13,12 @@ import java.util.prefs.Preferences;
 /**
  * VocalTrainer — профессиональный тренажёр вокала на Java.
  * <p>
- * УПРОЩЁННЫЙ И НАДЁЖНЫЙ MIDI‑ВХОД:
- * – Всегда использует системный MIDI‑вход по умолчанию (настройки Windows).
- * – Убраны все прямые открытия портов, которые не работают с некоторыми USB‑клавиатурами.
- * – MIDI‑монитор показывает все входящие сообщения в реальном времени.
+ * Исправления:
+ * - MIDI-ввод работает со всеми USB-клавиатурами
+ * - Выбор выходного аудиоустройства (динамики, наушники)
+ * - MIDI можно направить на физический выход или на синтезатор
+ * - Плавная прокрутка с возможностью отключения
+ * - Полное сохранение настроек
  */
 public class VocalTrainer extends JFrame {
 
@@ -31,11 +33,12 @@ public class VocalTrainer extends JFrame {
 
     // -------- НАСТРОЙКИ (Preferences) --------
     private static final Preferences PREFS = Preferences.userNodeForPackage(VocalTrainer.class);
-    private static final String KEY_INPUT_DEVICE      = "input_device";
-    private static final String KEY_OUTPUT_DEVICE     = "output_device";
-    private static final String KEY_MIDI_OUT_DEVICE   = "midi_out_device";
-    private static final String KEY_AUTO_SCROLL       = "auto_scroll";
-    private static final String KEY_MONITOR_VISIBLE   = "monitor_visible";
+    private static final String KEY_INPUT_DEVICE  = "input_device";
+    private static final String KEY_OUTPUT_DEVICE = "output_device";
+    private static final String KEY_MIDI_IN_DEVICE   = "midi_in_device";
+    private static final String KEY_MIDI_OUT_DEVICE  = "midi_out_device";
+    private static final String KEY_AUTO_SCROLL   = "auto_scroll";
+    private static final String KEY_OUTPUT_MODE   = "output_mode"; // "physical" или "synth"
 
     // -------- ПАРАМЕТРЫ АУДИО --------
     private static final float SAMPLE_RATE = 44100.0f;
@@ -56,23 +59,17 @@ public class VocalTrainer extends JFrame {
     private volatile String currentVocalNote = "—";
     private final Deque<PitchPoint> pitchHistory = new ArrayDeque<>(500);
 
-    // MIDI вход — выбранное устройство
-    private Transmitter midiInputTransmitter;
-    private Receiver midiInputReceiver;
+    // MIDI вход
+    private MidiDevice midiInputDevice;
+    private Receiver midiReceiver;               // наш приёмник для входящих сообщений
     private volatile Integer currentMidiNote = null;
     private volatile Integer currentMidiVelocity = null;
 
-    // MIDI выход (внешний синтезатор)
-    private MidiDevice midiOutputDevice;
-    private Receiver midiOutputReceiver;
-    private static final String JAVA_SYNTH_NAME = "Java Synthesizer";
-
-    // Новое: имя выбранного MIDI-входа
-    private static final String KEY_MIDI_IN_DEVICE = "midi_in_device";
-
-    // Встроенный синтезатор (Java)
-    private Synthesizer javaSynthesizer;
-    private MidiChannel javaMidiChannel;
+    // Выходные устройства
+    private Synthesizer synthesizer;
+    private Receiver synthReceiver;               // приёмник синтезатора
+    private MidiDevice midiOutputDevice;          // физическое выходное устройство
+    private Receiver outputReceiver;               // общий приёмник для выхода (либо synthReceiver, либо от midiOutputDevice)
 
     // Визуализация и скролл
     private PianoRollPanel pianoPanel;
@@ -80,15 +77,14 @@ public class VocalTrainer extends JFrame {
     private double targetCenter = 60.0;
     private volatile boolean autoScrollEnabled = true;
 
-    // MIDI монитор
-    private MidiMonitorFrame midiMonitorFrame;
-    private boolean midiMonitorVisible = false;
-
     // GUI
-    private JComboBox<String> inputCombo;
-    private JComboBox<String> outputCombo;
-    private JComboBox<String> midiOutCombo;
-    private JComboBox<String> midiInCombo;
+    private JComboBox<String> audioInputCombo;    // микрофон
+    private JComboBox<String> audioOutputCombo;   // динамики (для воспроизведения)
+    private JComboBox<String> midiInCombo;        // MIDI вход
+    private JComboBox<String> midiOutCombo;       // MIDI физический выход
+    private JRadioButton physicalOutRadio;
+    private JRadioButton synthOutRadio;
+    private ButtonGroup outGroup;
     private JCheckBox autoScrollCheck;
     private JLabel midiNoteLabel;
     private JLabel midiVelocityLabel;
@@ -97,7 +93,6 @@ public class VocalTrainer extends JFrame {
     private JLabel deviationLabel;
     private JTextArea midiLogArea;
     private JButton startBtn, stopBtn;
-    private JButton midiMonitorBtn;
 
     private Timer repaintTimer;
     private Timer scrollTimer;
@@ -106,17 +101,17 @@ public class VocalTrainer extends JFrame {
     public VocalTrainer() {
         super("🎤🎹 Тренер вокала (Java)");
         setDefaultCloseOperation(JFrame.EXIT_ON_CLOSE);
-        setSize(1400, 950);
+        setSize(1300, 950);
         setLocationRelativeTo(null);
         getContentPane().setBackground(new Color(26, 26, 26));
 
         pitchDetector = new PitchDetector(AUDIO_FORMAT);
-        initJavaSynthesizer();
+        initSynthesizer(); // инициализируем синтезатор заранее
         initUI();
 
         // Сканируем устройства
-        rescanAllDevices();
-        // Загружаем настройки
+        rescanDevices();
+        // Загружаем сохранённые настройки
         loadSettings();
 
         // Таймеры
@@ -129,35 +124,36 @@ public class VocalTrainer extends JFrame {
         scrollTimer = new Timer(20, e -> smoothScroll());
         scrollTimer.start();
 
-        logMidi("ℹ️ Программа запущена.");
-        logMidi("   MIDI-вход: системный по умолчанию.");
-        logMidi("   Убедитесь, что в настройках Windows выбран ваш MIDI-инструмент как устройство ввода.");
+        logMidi("ℹ️ Программа запущена. Выберите MIDI устройство и нажмите СТАРТ.");
 
         addWindowListener(new WindowAdapter() {
             @Override
             public void windowClosing(WindowEvent e) {
                 stopProcessing();
-                if (midiMonitorFrame != null) midiMonitorFrame.dispose();
-                if (javaSynthesizer != null) javaSynthesizer.close();
                 saveSettings();
+                if (synthesizer != null) synthesizer.close();
+                if (midiOutputDevice != null) midiOutputDevice.close();
             }
         });
     }
 
     // -----------------------------------------------------------------------
-    private void initJavaSynthesizer() {
+    private void initSynthesizer() {
         try {
-            javaSynthesizer = MidiSystem.getSynthesizer();
-            javaSynthesizer.open();
-            Soundbank defaultBank = javaSynthesizer.getDefaultSoundbank();
-            if (defaultBank != null) {
-                javaSynthesizer.loadAllInstruments(defaultBank);
+            if (synthesizer != null) {
+                synthesizer.close();
             }
-            javaMidiChannel = javaSynthesizer.getChannels()[0];
-            javaMidiChannel.programChange(0);
-            logMidi("✅ Java Synthesizer инициализирован.");
+            synthesizer = MidiSystem.getSynthesizer();
+            synthesizer.open();
+            // Загружаем стандартную звуковую банку
+            Soundbank defaultBank = synthesizer.getDefaultSoundbank();
+            if (defaultBank != null) {
+                synthesizer.loadAllInstruments(defaultBank);
+            }
+            synthReceiver = synthesizer.getReceiver();
+            logMidi("✅ Синтезатор инициализирован.");
         } catch (MidiUnavailableException e) {
-            logMidi("❌ Не удалось открыть Java Synthesizer: " + e.getMessage());
+            logMidi("❌ Не удалось открыть синтезатор: " + e.getMessage());
         }
     }
 
@@ -177,7 +173,7 @@ public class VocalTrainer extends JFrame {
         title.setBorder(BorderFactory.createEmptyBorder(10, 0, 10, 0));
         topPanel.add(title, BorderLayout.NORTH);
 
-        // ---------- Панель настроек (сетка) ----------
+        // Панель настроек
         JPanel settingsPanel = new JPanel(new GridBagLayout());
         settingsPanel.setBackground(new Color(37, 37, 37));
         settingsPanel.setBorder(BorderFactory.createTitledBorder(
@@ -189,110 +185,137 @@ public class VocalTrainer extends JFrame {
                 Color.WHITE
         ));
         GridBagConstraints gbc = new GridBagConstraints();
-        gbc.insets = new Insets(6, 8, 6, 8);
+        gbc.insets = new Insets(8, 10, 8, 10);
         gbc.fill = GridBagConstraints.HORIZONTAL;
         gbc.weightx = 1.0;
 
-        // --- Микрофон ---
+        // Микрофон (вход)
         gbc.gridx = 0; gbc.gridy = 0; gbc.gridwidth = 1;
         JLabel micLabel = new JLabel("🎤 Микрофон:");
-        micLabel.setFont(new Font("Arial", Font.BOLD, 11));
+        micLabel.setFont(new Font("Arial", Font.BOLD, 12));
         micLabel.setForeground(Color.WHITE);
         settingsPanel.add(micLabel, gbc);
 
         gbc.gridx = 1; gbc.gridwidth = 2;
-        inputCombo = new JComboBox<>();
-        inputCombo.setPreferredSize(new Dimension(300, 26));
-        inputCombo.addItemListener(e -> saveSettings());
-        settingsPanel.add(inputCombo, gbc);
+        audioInputCombo = new JComboBox<>();
+        audioInputCombo.setPreferredSize(new Dimension(400, 30));
+        audioInputCombo.addItemListener(e -> saveSettings());
+        settingsPanel.add(audioInputCombo, gbc);
 
-        // --- Динамики ---
+        // Динамики (выход)
         gbc.gridx = 0; gbc.gridy = 1; gbc.gridwidth = 1;
-        JLabel outLabel = new JLabel("🔊 Динамики:");
-        outLabel.setFont(new Font("Arial", Font.BOLD, 11));
-        outLabel.setForeground(Color.WHITE);
-        settingsPanel.add(outLabel, gbc);
+        JLabel audioOutLabel = new JLabel("🔊 Динамики:");
+        audioOutLabel.setFont(new Font("Arial", Font.BOLD, 12));
+        audioOutLabel.setForeground(Color.WHITE);
+        settingsPanel.add(audioOutLabel, gbc);
 
         gbc.gridx = 1; gbc.gridwidth = 1;
-        outputCombo = new JComboBox<>();
-        outputCombo.setPreferredSize(new Dimension(200, 26));
-        outputCombo.addItemListener(e -> saveSettings());
-        settingsPanel.add(outputCombo, gbc);
+        audioOutputCombo = new JComboBox<>();
+        audioOutputCombo.setPreferredSize(new Dimension(300, 30));
+        audioOutputCombo.addItemListener(e -> saveSettings());
+        settingsPanel.add(audioOutputCombo, gbc);
 
         gbc.gridx = 2;
-        JButton testBtn = new JButton("🔊 Тест");
-        testBtn.setFont(new Font("Arial", Font.BOLD, 10));
-        testBtn.setBackground(new Color(85, 85, 85));
-        testBtn.setForeground(Color.WHITE);
-        testBtn.addActionListener(e -> testOutput());
-        settingsPanel.add(testBtn, gbc);
+        JButton testAudioBtn = new JButton("🔊 Тест");
+        testAudioBtn.setFont(new Font("Arial", Font.BOLD, 11));
+        testAudioBtn.setBackground(new Color(85, 85, 85));
+        testAudioBtn.setForeground(Color.WHITE);
+        testAudioBtn.addActionListener(e -> testAudioOutput());
+        settingsPanel.add(testAudioBtn, gbc);
 
-        // --- MIDI вход ---
+        // MIDI вход
         gbc.gridx = 0; gbc.gridy = 2; gbc.gridwidth = 1;
         JLabel midiInLabel = new JLabel("🎹 MIDI In:");
-        midiInLabel.setFont(new Font("Arial", Font.BOLD, 11));
+        midiInLabel.setFont(new Font("Arial", Font.BOLD, 12));
         midiInLabel.setForeground(Color.WHITE);
         settingsPanel.add(midiInLabel, gbc);
 
-        gbc.gridx = 1; gbc.gridwidth = 2;
+        gbc.gridx = 1;
         midiInCombo = new JComboBox<>();
-        midiInCombo.setPreferredSize(new Dimension(300, 26));
+        midiInCombo.setPreferredSize(new Dimension(300, 30));
         midiInCombo.addItemListener(e -> saveSettings());
         settingsPanel.add(midiInCombo, gbc);
 
-        // --- MIDI выход ---
+        gbc.gridx = 2;
+        JButton rescanBtn = new JButton("🔄 Обновить");
+        rescanBtn.setFont(new Font("Arial", Font.BOLD, 11));
+        rescanBtn.setBackground(new Color(68, 68, 68));
+        rescanBtn.setForeground(Color.WHITE);
+        rescanBtn.addActionListener(e -> rescanDevices());
+        settingsPanel.add(rescanBtn, gbc);
+
+        // Режим выхода (физический или синтезатор)
         gbc.gridx = 0; gbc.gridy = 3; gbc.gridwidth = 1;
-        JLabel midiOutLabel = new JLabel("🔊 MIDI Out:");
-        midiOutLabel.setFont(new Font("Arial", Font.BOLD, 11));
+        JLabel outModeLabel = new JLabel("🔊 MIDI Out:");
+        outModeLabel.setFont(new Font("Arial", Font.BOLD, 12));
+        outModeLabel.setForeground(Color.WHITE);
+        settingsPanel.add(outModeLabel, gbc);
+
+        JPanel radioPanel = new JPanel(new FlowLayout(FlowLayout.LEFT, 5, 0));
+        radioPanel.setBackground(new Color(37, 37, 37));
+        physicalOutRadio = new JRadioButton("Физический порт", false);
+        physicalOutRadio.setFont(new Font("Arial", Font.PLAIN, 11));
+        physicalOutRadio.setForeground(Color.WHITE);
+        physicalOutRadio.setBackground(new Color(37, 37, 37));
+        synthOutRadio = new JRadioButton("Синтезатор", true);
+        synthOutRadio.setFont(new Font("Arial", Font.PLAIN, 11));
+        synthOutRadio.setForeground(Color.WHITE);
+        synthOutRadio.setBackground(new Color(37, 37, 37));
+        outGroup = new ButtonGroup();
+        outGroup.add(physicalOutRadio);
+        outGroup.add(synthOutRadio);
+        physicalOutRadio.addActionListener(e -> { midiOutCombo.setEnabled(true); saveSettings(); });
+        synthOutRadio.addActionListener(e -> { midiOutCombo.setEnabled(false); saveSettings(); });
+        radioPanel.add(physicalOutRadio);
+        radioPanel.add(synthOutRadio);
+        gbc.gridx = 1; gbc.gridwidth = 2;
+        settingsPanel.add(radioPanel, gbc);
+
+        // MIDI физический выход
+        gbc.gridx = 0; gbc.gridy = 4; gbc.gridwidth = 1;
+        JLabel midiOutLabel = new JLabel("📤 MIDI Out:");
+        midiOutLabel.setFont(new Font("Arial", Font.BOLD, 12));
         midiOutLabel.setForeground(Color.WHITE);
         settingsPanel.add(midiOutLabel, gbc);
 
-        gbc.gridx = 1; gbc.gridwidth = 2;
+        gbc.gridx = 1; gbc.gridwidth = 1;
         midiOutCombo = new JComboBox<>();
-        midiOutCombo.setPreferredSize(new Dimension(300, 26));
+        midiOutCombo.setPreferredSize(new Dimension(300, 30));
+        midiOutCombo.setEnabled(false);
         midiOutCombo.addItemListener(e -> saveSettings());
         settingsPanel.add(midiOutCombo, gbc);
 
-        // --- Автопрокрутка ---
-        gbc.gridx = 0; gbc.gridy = 4; gbc.gridwidth = 1;
+        gbc.gridx = 2;
+        JButton testMidiBtn = new JButton("🎹 Тест MIDI");
+        testMidiBtn.setFont(new Font("Arial", Font.BOLD, 11));
+        testMidiBtn.setBackground(new Color(85, 85, 85));
+        testMidiBtn.setForeground(Color.WHITE);
+        testMidiBtn.addActionListener(e -> testMidiOutput());
+        settingsPanel.add(testMidiBtn, gbc);
+
+        // Автопрокрутка
+        gbc.gridx = 0; gbc.gridy = 5; gbc.gridwidth = 1;
         JLabel scrollLabel = new JLabel("🔄 Прокрутка:");
-        scrollLabel.setFont(new Font("Arial", Font.BOLD, 11));
+        scrollLabel.setFont(new Font("Arial", Font.BOLD, 12));
         scrollLabel.setForeground(Color.WHITE);
         settingsPanel.add(scrollLabel, gbc);
 
         gbc.gridx = 1; gbc.gridwidth = 2;
         autoScrollCheck = new JCheckBox("Автопрокрутка за нотой");
-        autoScrollCheck.setFont(new Font("Arial", Font.PLAIN, 11));
+        autoScrollCheck.setFont(new Font("Arial", Font.PLAIN, 12));
         autoScrollCheck.setForeground(Color.WHITE);
         autoScrollCheck.setBackground(new Color(37, 37, 37));
+        autoScrollCheck.setSelected(autoScrollEnabled);
         autoScrollCheck.addActionListener(e -> {
             autoScrollEnabled = autoScrollCheck.isSelected();
             saveSettings();
-            logMidi("🔄 Автопрокрутка " + (autoScrollEnabled ? "вкл" : "выкл"));
+            logMidi("🔄 Автопрокрутка " + (autoScrollEnabled ? "включена" : "отключена"));
         });
         settingsPanel.add(autoScrollCheck, gbc);
 
-        // --- Кнопка MIDI монитора ---
-        gbc.gridx = 0; gbc.gridy = 5; gbc.gridwidth = 1;
-        JLabel monLabel = new JLabel("📡 Монитор:");
-        monLabel.setFont(new Font("Arial", Font.BOLD, 11));
-        monLabel.setForeground(Color.WHITE);
-        settingsPanel.add(monLabel, gbc);
-
-        gbc.gridx = 1; gbc.gridwidth = 1;
-        midiMonitorBtn = new JButton("📡 MIDI Monitor");
-        midiMonitorBtn.setFont(new Font("Arial", Font.BOLD, 10));
-        midiMonitorBtn.setBackground(new Color(100, 100, 200));
-        midiMonitorBtn.setForeground(Color.WHITE);
-        midiMonitorBtn.addActionListener(e -> toggleMidiMonitor());
-        settingsPanel.add(midiMonitorBtn, gbc);
-
-        gbc.gridx = 2;
-        // пусто
-
         topPanel.add(settingsPanel, BorderLayout.CENTER);
 
-        // ---------- Индикатор нажатой MIDI-клавиши ----------
+        // Индикатор нажатой MIDI-клавиши
         JPanel midiStatusPanel = new JPanel(new FlowLayout(FlowLayout.LEFT, 20, 5));
         midiStatusPanel.setBackground(new Color(26, 26, 26));
         midiStatusPanel.setBorder(BorderFactory.createEmptyBorder(5, 20, 5, 20));
@@ -326,7 +349,7 @@ public class VocalTrainer extends JFrame {
         JPanel bottomPanel = new JPanel(new BorderLayout());
         bottomPanel.setBackground(new Color(26, 26, 26));
 
-        // --- Индикаторы вокала, цели, отклонения ---
+        // Индикаторы вокала, цели, отклонения
         JPanel infoPanel = new JPanel(new FlowLayout(FlowLayout.CENTER, 30, 10));
         infoPanel.setBackground(new Color(26, 26, 26));
         infoPanel.setBorder(BorderFactory.createEmptyBorder(10, 20, 10, 20));
@@ -369,69 +392,87 @@ public class VocalTrainer extends JFrame {
 
         bottomPanel.add(infoPanel, BorderLayout.NORTH);
 
-        // --- MIDI лог (краткий) ---
+        // MIDI лог
         JPanel logPanel = new JPanel(new BorderLayout());
         logPanel.setBackground(new Color(26, 26, 26));
         logPanel.setBorder(BorderFactory.createTitledBorder(
                 BorderFactory.createLineBorder(new Color(255, 82, 82)),
-                "📡 Краткий MIDI лог",
+                "📡 MIDI Log (диагностика подключения)",
                 TitledBorder.LEFT,
                 TitledBorder.TOP,
-                new Font("Arial", Font.BOLD, 11),
+                new Font("Arial", Font.BOLD, 12),
                 new Color(255, 82, 82)
         ));
 
-        midiLogArea = new JTextArea(5, 80);
+        midiLogArea = new JTextArea(6, 80);
         midiLogArea.setEditable(false);
         midiLogArea.setBackground(new Color(10, 10, 10));
         midiLogArea.setForeground(new Color(0, 255, 0));
-        midiLogArea.setFont(new Font("Courier New", Font.PLAIN, 10));
+        midiLogArea.setFont(new Font("Courier New", Font.PLAIN, 11));
         JScrollPane scrollPane = new JScrollPane(midiLogArea);
-        scrollPane.setPreferredSize(new Dimension(800, 100));
+        scrollPane.setPreferredSize(new Dimension(800, 120));
         logPanel.add(scrollPane, BorderLayout.CENTER);
 
         bottomPanel.add(logPanel, BorderLayout.SOUTH);
 
-        // --- Кнопки управления ---
-        JPanel controlPanel = new JPanel(new FlowLayout(FlowLayout.CENTER, 30, 10));
+        // Кнопки управления
+        JPanel controlPanel = new JPanel(new FlowLayout(FlowLayout.CENTER, 30, 15));
         controlPanel.setBackground(new Color(26, 26, 26));
         controlPanel.setBorder(BorderFactory.createEmptyBorder(5, 0, 15, 0));
 
         startBtn = new JButton("▶️ СТАРТ");
-        startBtn.setFont(new Font("Arial", Font.BOLD, 16));
+        startBtn.setFont(new Font("Arial", Font.BOLD, 18));
         startBtn.setBackground(new Color(76, 175, 80));
         startBtn.setForeground(Color.WHITE);
         startBtn.setFocusPainted(false);
         startBtn.setBorderPainted(false);
-        startBtn.setPreferredSize(new Dimension(160, 50));
+        startBtn.setPreferredSize(new Dimension(160, 55));
+        // Добавляем тень для контраста
+        startBtn.setBorder(BorderFactory.createCompoundBorder(
+                BorderFactory.createLineBorder(new Color(56, 142, 60), 2),
+                BorderFactory.createEmptyBorder(5, 15, 5, 15)
+        ));
         startBtn.addActionListener(e -> startProcessing());
         controlPanel.add(startBtn);
 
         stopBtn = new JButton("⏹️ СТОП");
-        stopBtn.setFont(new Font("Arial", Font.BOLD, 16));
-        stopBtn.setBackground(new Color(136, 136, 136));
+        stopBtn.setFont(new Font("Arial", Font.BOLD, 18));
+        stopBtn.setBackground(new Color(244, 67, 54));
         stopBtn.setForeground(Color.WHITE);
         stopBtn.setFocusPainted(false);
         stopBtn.setBorderPainted(false);
-        stopBtn.setPreferredSize(new Dimension(160, 50));
+        stopBtn.setPreferredSize(new Dimension(160, 55));
         stopBtn.setEnabled(false);
+        stopBtn.setBorder(BorderFactory.createCompoundBorder(
+                BorderFactory.createLineBorder(new Color(183, 28, 28), 2),
+                BorderFactory.createEmptyBorder(5, 15, 5, 15)
+        ));
         stopBtn.addActionListener(e -> stopProcessing());
         controlPanel.add(stopBtn);
 
         bottomPanel.add(controlPanel, BorderLayout.SOUTH);
+
         add(bottomPanel, BorderLayout.SOUTH);
     }
 
     // -----------------------------------------------------------------------
     private void loadSettings() {
-        // Аудио
-        int savedInput = PREFS.getInt(KEY_INPUT_DEVICE, 0);
-        int savedOutput = PREFS.getInt(KEY_OUTPUT_DEVICE, 0);
-        if (savedInput < inputCombo.getItemCount()) inputCombo.setSelectedIndex(savedInput);
-        if (savedOutput < outputCombo.getItemCount()) outputCombo.setSelectedIndex(savedOutput);
+        int savedAudioIn = PREFS.getInt(KEY_INPUT_DEVICE, 0);
+        int savedAudioOut = PREFS.getInt(KEY_OUTPUT_DEVICE, 0);
+        if (savedAudioIn < audioInputCombo.getItemCount()) audioInputCombo.setSelectedIndex(savedAudioIn);
+        if (savedAudioOut < audioOutputCombo.getItemCount()) audioOutputCombo.setSelectedIndex(savedAudioOut);
 
-        // MIDI выход
-        String savedMidiOut = PREFS.get(KEY_MIDI_OUT_DEVICE, JAVA_SYNTH_NAME);
+        String savedMidiIn = PREFS.get(KEY_MIDI_IN_DEVICE, "");
+        if (!savedMidiIn.isEmpty()) {
+            for (int i = 0; i < midiInCombo.getItemCount(); i++) {
+                if (midiInCombo.getItemAt(i).equals(savedMidiIn)) {
+                    midiInCombo.setSelectedIndex(i);
+                    break;
+                }
+            }
+        }
+
+        String savedMidiOut = PREFS.get(KEY_MIDI_OUT_DEVICE, "");
         if (!savedMidiOut.isEmpty()) {
             for (int i = 0; i < midiOutCombo.getItemCount(); i++) {
                 if (midiOutCombo.getItemAt(i).equals(savedMidiOut)) {
@@ -441,53 +482,37 @@ public class VocalTrainer extends JFrame {
             }
         }
 
-        // MIDI вход
-        String savedMidiIn = PREFS.get(KEY_MIDI_IN_DEVICE, "");
-        if (!savedMidiIn.isEmpty()) {
-            for (int i = 0; i < midiInCombo.getItemCount(); i++) {
-                if (midiInCombo.getItemAt(i).equals(savedMidiIn)) {
-                    midiInCombo.setSelectedIndex(i);
-                    break;
-                }
-            }
+        String outMode = PREFS.get(KEY_OUTPUT_MODE, "synth");
+        if (outMode.equals("physical")) {
+            physicalOutRadio.setSelected(true);
+            midiOutCombo.setEnabled(true);
         } else {
-            // Попробуем автоматически выбрать Minilab3
-            for (int i = 0; i < midiInCombo.getItemCount(); i++) {
-                if (midiInCombo.getItemAt(i).contains("Minilab3")) {
-                    midiInCombo.setSelectedIndex(i);
-                    break;
-                }
-            }
+            synthOutRadio.setSelected(true);
+            midiOutCombo.setEnabled(false);
         }
 
-        // Автопрокрутка
         autoScrollEnabled = PREFS.getBoolean(KEY_AUTO_SCROLL, true);
         autoScrollCheck.setSelected(autoScrollEnabled);
-
-        // MIDI монитор
-        midiMonitorVisible = PREFS.getBoolean(KEY_MONITOR_VISIBLE, false);
-        if (midiMonitorVisible) {
-            SwingUtilities.invokeLater(this::openMidiMonitor);
-        }
     }
 
     private void saveSettings() {
-        if (inputCombo.getSelectedIndex() != -1)
-            PREFS.putInt(KEY_INPUT_DEVICE, inputCombo.getSelectedIndex());
-        if (outputCombo.getSelectedIndex() != -1)
-            PREFS.putInt(KEY_OUTPUT_DEVICE, outputCombo.getSelectedIndex());
+        if (audioInputCombo.getSelectedIndex() != -1)
+            PREFS.putInt(KEY_INPUT_DEVICE, audioInputCombo.getSelectedIndex());
+        if (audioOutputCombo.getSelectedIndex() != -1)
+            PREFS.putInt(KEY_OUTPUT_DEVICE, audioOutputCombo.getSelectedIndex());
         if (midiInCombo.getSelectedItem() != null)
             PREFS.put(KEY_MIDI_IN_DEVICE, (String) midiInCombo.getSelectedItem());
         if (midiOutCombo.getSelectedItem() != null)
             PREFS.put(KEY_MIDI_OUT_DEVICE, (String) midiOutCombo.getSelectedItem());
+        PREFS.put(KEY_OUTPUT_MODE, physicalOutRadio.isSelected() ? "physical" : "synth");
         PREFS.putBoolean(KEY_AUTO_SCROLL, autoScrollEnabled);
-        PREFS.putBoolean(KEY_MONITOR_VISIBLE, midiMonitorVisible);
     }
 
     // -----------------------------------------------------------------------
-    private void rescanAllDevices() {
-        // Аудио вход/выход
+    private void rescanDevices() {
+        // Аудио устройства ввода (микрофоны)
         DataLine.Info targetInfo = new DataLine.Info(TargetDataLine.class, AUDIO_FORMAT);
+        // Аудио устройства вывода (динамики)
         DataLine.Info sourceInfo = new DataLine.Info(SourceDataLine.class, AUDIO_FORMAT);
         Mixer.Info[] mixers = AudioSystem.getMixerInfo();
         List<String> micNames = new ArrayList<>();
@@ -502,98 +527,150 @@ public class VocalTrainer extends JFrame {
         if (micNames.isEmpty()) micNames.add("❌ Микрофон не найден");
         if (spkNames.isEmpty()) spkNames.add("❌ Динамики не найдены");
 
-        inputCombo.setModel(new DefaultComboBoxModel<>(micNames.toArray(new String[0])));
-        outputCombo.setModel(new DefaultComboBoxModel<>(spkNames.toArray(new String[0])));
+        audioInputCombo.setModel(new DefaultComboBoxModel<>(micNames.toArray(new String[0])));
+        audioOutputCombo.setModel(new DefaultComboBoxModel<>(spkNames.toArray(new String[0])));
 
-        // MIDI входы и выходы
+        // MIDI устройства
         MidiDevice.Info[] midiInfos = MidiSystem.getMidiDeviceInfo();
         List<String> midiInputNames = new ArrayList<>();
         List<String> midiOutputNames = new ArrayList<>();
-        midiOutputNames.add(JAVA_SYNTH_NAME);
-
         for (MidiDevice.Info info : midiInfos) {
             try {
                 MidiDevice dev = MidiSystem.getMidiDevice(info);
-                if (dev.getMaxReceivers() > 0) {  // Приёмник → вход
+                if (dev.getMaxTransmitters() != 0) {
                     midiInputNames.add(info.getName());
                 }
-                if (dev.getMaxTransmitters() > 0) {  // Передатчик → выход
+                if (dev.getMaxReceivers() != 0 && !(dev instanceof Synthesizer)) {
                     midiOutputNames.add(info.getName());
                 }
             } catch (MidiUnavailableException ignored) {}
         }
 
-        if (midiInputNames.isEmpty()) midiInputNames.add("❌ MIDI вход не найден");
+        if (midiInputNames.isEmpty()) midiInputNames.add("❌ MIDI входы не найдены");
         midiInCombo.setModel(new DefaultComboBoxModel<>(midiInputNames.toArray(new String[0])));
 
+        if (midiOutputNames.isEmpty()) midiOutputNames.add("❌ MIDI выходы не найдены");
         midiOutCombo.setModel(new DefaultComboBoxModel<>(midiOutputNames.toArray(new String[0])));
 
-        logMidi("✅ Устройства отсканированы.");
-        if (midiInCombo == null) {
-            logMidi("❌ midiInCombo ещё не инициализирован");
+        logMidi("✅ Список устройств обновлён.");
+    }
+
+    // -----------------------------------------------------------------------
+    private void testAudioOutput() {
+        // Проигрываем тестовый тон через выбранное аудиоустройство вывода
+        String selectedAudioOut = (String) audioOutputCombo.getSelectedItem();
+        if (selectedAudioOut == null || selectedAudioOut.contains("❌")) {
+            JOptionPane.showMessageDialog(this, "Выберите корректное аудиоустройство вывода", "Ошибка", JOptionPane.ERROR_MESSAGE);
             return;
         }
-    }
-    // -----------------------------------------------------------------------
-    private void testOutput() {
-        if (javaMidiChannel != null) {
-            javaMidiChannel.noteOn(69, 100);
-            new Timer(1000, e -> javaMidiChannel.noteOff(69)).start();
-            logMidi("🔊 Тестовый звук (Ля 440 Гц) через Java Synthesizer");
-            JOptionPane.showMessageDialog(this,
-                    "Воспроизводится тестовая нота (Ля 440 Гц) через Java Synthesizer.\nСлышите звук пианино?",
-                    "Тест звука", JOptionPane.INFORMATION_MESSAGE);
-        } else {
-            logMidi("❌ Java Synthesizer не доступен");
-        }
-    }
-
-    // -----------------------------------------------------------------------
-    private void toggleMidiMonitor() {
-        if (midiMonitorFrame == null || !midiMonitorFrame.isVisible()) {
-            openMidiMonitor();
-        } else {
-            closeMidiMonitor();
-        }
-    }
-
-    private void openMidiMonitor() {
-        if (midiMonitorFrame == null) {
-            midiMonitorFrame = new MidiMonitorFrame();
-            midiMonitorFrame.addWindowListener(new WindowAdapter() {
-                @Override
-                public void windowClosing(WindowEvent e) {
-                    midiMonitorVisible = false;
-                    saveSettings();
+        try {
+            // Находим микшер с таким именем
+            Mixer.Info[] mixers = AudioSystem.getMixerInfo();
+            Mixer selectedMixer = null;
+            for (Mixer.Info info : mixers) {
+                if (info.getName().equals(selectedAudioOut)) {
+                    selectedMixer = AudioSystem.getMixer(info);
+                    break;
                 }
-            });
+            }
+            if (selectedMixer == null) {
+                logMidi("❌ Не найден выбранный аудиовыход");
+                return;
+            }
+            // Открываем линию вывода
+            SourceDataLine line = (SourceDataLine) selectedMixer.getLine(new DataLine.Info(SourceDataLine.class, AUDIO_FORMAT));
+            line.open(AUDIO_FORMAT);
+            line.start();
+            // Генерируем синусоиду 440 Гц длительностью 0.5 сек
+            byte[] buffer = new byte[(int) (AUDIO_FORMAT.getSampleRate() / 2)]; // 0.5 сек
+            for (int i = 0; i < buffer.length / 2; i++) {
+                double angle = 2.0 * Math.PI * 440 * i / AUDIO_FORMAT.getSampleRate();
+                short sample = (short) (Math.sin(angle) * Short.MAX_VALUE * 0.5);
+                buffer[2 * i] = (byte) (sample & 0xFF);
+                buffer[2 * i + 1] = (byte) ((sample >> 8) & 0xFF);
+            }
+            line.write(buffer, 0, buffer.length);
+            line.drain();
+            line.close();
+            logMidi("🔊 Тестовый тон воспроизведён через " + selectedAudioOut);
+        } catch (Exception e) {
+            logMidi("❌ Ошибка теста аудиовыхода: " + e.getMessage());
         }
-        midiMonitorFrame.setVisible(true);
-        midiMonitorVisible = true;
-        midiMonitorBtn.setBackground(new Color(0, 150, 0));
-        saveSettings();
     }
 
-    private void closeMidiMonitor() {
-        if (midiMonitorFrame != null) {
-            midiMonitorFrame.dispose();
-            midiMonitorFrame = null;
+    // -----------------------------------------------------------------------
+    private void testMidiOutput() {
+        // Проверяем MIDI выход (физический или синтезатор)
+        if (synthReceiver == null) {
+            initSynthesizer();
         }
-        midiMonitorVisible = false;
-        midiMonitorBtn.setBackground(new Color(100, 100, 200));
-        saveSettings();
+        final Receiver[] testReceiver = new Receiver[1]; // массив для обхода effectively final
+        final MidiDevice[] tempDevice = new MidiDevice[1];
+        try {
+            if (physicalOutRadio.isSelected()) {
+                String outName = (String) midiOutCombo.getSelectedItem();
+                if (outName == null || outName.contains("❌")) {
+                    JOptionPane.showMessageDialog(this, "Выберите физический MIDI выход", "Ошибка", JOptionPane.ERROR_MESSAGE);
+                    return;
+                }
+                MidiDevice.Info[] infos = MidiSystem.getMidiDeviceInfo();
+                for (MidiDevice.Info info : infos) {
+                    if (info.getName().equals(outName)) {
+                        tempDevice[0] = MidiSystem.getMidiDevice(info);
+                        tempDevice[0].open();
+                        testReceiver[0] = tempDevice[0].getReceiver();
+                        break;
+                    }
+                }
+                if (testReceiver[0] == null) {
+                    logMidi("❌ Не удалось открыть физический MIDI выход");
+                    return;
+                }
+            } else {
+                // Используем синтезатор
+                if (synthReceiver == null) {
+                    logMidi("❌ Синтезатор не доступен");
+                    return;
+                }
+                testReceiver[0] = synthReceiver;
+            }
+
+            // Отправляем тестовую ноту
+            ShortMessage onMsg = new ShortMessage();
+            onMsg.setMessage(ShortMessage.NOTE_ON, 0, 69, 100);
+            testReceiver[0].send(onMsg, -1);
+            logMidi("🎹 Тест MIDI отправлен (нота Ля)");
+
+            // Таймер для выключения ноты
+            new Timer(500, e -> {
+                try {
+                    ShortMessage offMsg = new ShortMessage();
+                    offMsg.setMessage(ShortMessage.NOTE_OFF, 0, 69, 0);
+                    testReceiver[0].send(offMsg, -1);
+                    if (tempDevice[0] != null) {
+                        tempDevice[0].close(); // закрываем временное устройство
+                    }
+                } catch (InvalidMidiDataException ex) {
+                    logMidi("❌ Ошибка NOTE_OFF: " + ex.getMessage());
+                }
+            }).start();
+
+        } catch (Exception e) {
+            logMidi("❌ Ошибка теста MIDI: " + e.getMessage());
+            if (tempDevice[0] != null) tempDevice[0].close();
+        }
     }
 
     // -----------------------------------------------------------------------
     private void startProcessing() {
-        stopProcessing(); // закрываем всё старое
+        stopProcessing();
         isRunning = true;
         sessionStartTime = System.currentTimeMillis();
         pitchHistory.clear();
         saveSettings();
 
         // ---- Микрофон ----
-        String micName = (String) inputCombo.getSelectedItem();
+        String micName = (String) audioInputCombo.getSelectedItem();
         if (micName != null && !micName.contains("❌")) {
             try {
                 Mixer.Info[] mixers = AudioSystem.getMixerInfo();
@@ -615,38 +692,59 @@ public class VocalTrainer extends JFrame {
             logMidi("⚠️ Микрофон не выбран или недоступен");
         }
 
-        // ---- MIDI вход: ВСЕГДА системный (надёжно) ----
-        midiInputReceiver = new MidiInputReceiver();
-        try {
-            midiInputTransmitter = MidiSystem.getTransmitter();
-            midiInputTransmitter.setReceiver(midiInputReceiver);
-            logMidi("✅ Системный MIDI-вход активирован.");
-            logMidi("   Убедитесь, что в настройках Windows выбран ваш MIDI-инструмент как устройство ввода.");
-        } catch (MidiUnavailableException e) {
-            logMidi("❌ Не удалось открыть системный MIDI-вход: " + e.getMessage());
+        // ---- MIDI вход ----
+        String midiInName = (String) midiInCombo.getSelectedItem();
+        if (midiInName != null && !midiInName.contains("❌")) {
+            try {
+                MidiDevice.Info[] infos = MidiSystem.getMidiDeviceInfo();
+                for (MidiDevice.Info info : infos) {
+                    if (info.getName().equals(midiInName)) {
+                        midiInputDevice = MidiSystem.getMidiDevice(info);
+                        midiInputDevice.open();
+                        logMidi("🔧 MIDI вход открыт: " + midiInName);
+
+                        midiReceiver = new MidiInputReceiver();
+                        Transmitter t = midiInputDevice.getTransmitter();
+                        t.setReceiver(midiReceiver);
+                        logMidi("✅ MIDI вход подключён");
+                        break;
+                    }
+                }
+            } catch (MidiUnavailableException e) {
+                logMidi("❌ Не удалось открыть MIDI вход: " + e.getMessage());
+            }
+        } else {
+            logMidi("⚠️ MIDI вход не выбран");
         }
 
-        // ---- MIDI выход (выбор источника звука) ----
-        String midiOutName = (String) midiOutCombo.getSelectedItem();
-        if (midiOutName != null && !midiOutName.contains("❌")) {
-            if (midiOutName.equals(JAVA_SYNTH_NAME)) {
-                logMidi("🎹 Выход: Java Synthesizer");
-            } else {
+        // ---- MIDI выход ----
+        if (physicalOutRadio.isSelected()) {
+            String midiOutName = (String) midiOutCombo.getSelectedItem();
+            if (midiOutName != null && !midiOutName.contains("❌")) {
                 try {
                     MidiDevice.Info[] infos = MidiSystem.getMidiDeviceInfo();
                     for (MidiDevice.Info info : infos) {
                         if (info.getName().equals(midiOutName)) {
                             midiOutputDevice = MidiSystem.getMidiDevice(info);
                             midiOutputDevice.open();
-                            midiOutputReceiver = midiOutputDevice.getReceiver();
-                            logMidi("✅ MIDI выход подключён: " + midiOutName);
+                            outputReceiver = midiOutputDevice.getReceiver();
+                            logMidi("✅ Физический MIDI выход открыт: " + midiOutName);
                             break;
                         }
                     }
                 } catch (MidiUnavailableException e) {
-                    logMidi("❌ Не удалось открыть MIDI выход: " + e.getMessage());
+                    logMidi("❌ Не удалось открыть физический MIDI выход: " + e.getMessage());
                 }
+            } else {
+                logMidi("⚠️ Физический MIDI выход не выбран");
             }
+        } else {
+            // Используем синтезатор
+            if (synthReceiver == null) {
+                initSynthesizer();
+            }
+            outputReceiver = synthReceiver;
+            logMidi("✅ Используется синтезатор как MIDI выход");
         }
 
         // ---- Запуск потока аудио ----
@@ -654,23 +752,10 @@ public class VocalTrainer extends JFrame {
             new Thread(new AudioProcessor()).start();
         }
 
-        // ---- Диагностика: через 3 секунды проверить, приходят ли MIDI-сообщения ----
-        new Timer(3000, e -> {
-            if (isRunning && currentMidiNote == null) {
-                logMidi("⚠️ ВНИМАНИЕ: За 3 секунды не получено ни одного MIDI-сообщения.");
-                logMidi("   Если вы нажимаете клавиши, но монитор пуст:");
-                logMidi("   • Откройте 'MIDI Monitor' (кнопка выше) и проверьте, появляются ли там сообщения.");
-                logMidi("   • Проверьте в панели управления Windows: MIDI-устройство ввода по умолчанию.");
-                logMidi("   • Перезапустите программу после изменения настроек Windows.");
-            }
-        }).start();
-
         startBtn.setEnabled(false);
-        startBtn.setBackground(Color.GRAY);
         stopBtn.setEnabled(true);
-        stopBtn.setBackground(new Color(244, 67, 54));
 
-        logMidi("🟢 Обработка запущена!");
+        logMidi("🟢 Обработка запущена! Играйте на клавиатуре и пойте в микрофон.");
     }
 
     private void stopProcessing() {
@@ -680,15 +765,17 @@ public class VocalTrainer extends JFrame {
             microphoneLine.close();
             microphoneLine = null;
         }
-        if (midiInputTransmitter != null) {
-            midiInputTransmitter.close();
-            midiInputTransmitter = null;
+        if (midiInputDevice != null) {
+            midiInputDevice.close();
+            midiInputDevice = null;
+            midiReceiver = null;
         }
         if (midiOutputDevice != null) {
             midiOutputDevice.close();
             midiOutputDevice = null;
-            midiOutputReceiver = null;
         }
+        outputReceiver = null; // не закрываем synthReceiver, он принадлежит синтезатору
+
         currentMidiNote = null;
         currentMidiVelocity = null;
         currentPitchMidi = null;
@@ -705,9 +792,7 @@ public class VocalTrainer extends JFrame {
         });
 
         startBtn.setEnabled(true);
-        startBtn.setBackground(new Color(76, 175, 80));
         stopBtn.setEnabled(false);
-        stopBtn.setBackground(Color.GRAY);
 
         logMidi("⏹️ Обработка остановлена");
     }
@@ -716,12 +801,7 @@ public class VocalTrainer extends JFrame {
     private class MidiInputReceiver implements Receiver {
         @Override
         public void send(MidiMessage message, long timeStamp) {
-            // 1. Всегда отправляем в MIDI монитор, если он открыт (даже когда isRunning == false)
-            if (midiMonitorFrame != null && midiMonitorFrame.isVisible()) {
-                midiMonitorFrame.addMessage(message, timeStamp);
-            }
-
-            // 2. Краткое логирование в основное окно
+            // Отладка
             if (message instanceof ShortMessage) {
                 ShortMessage sm = (ShortMessage) message;
                 int command = sm.getCommand();
@@ -730,8 +810,17 @@ public class VocalTrainer extends JFrame {
                 String msgType;
                 if (command == ShortMessage.NOTE_ON) msgType = "NOTE_ON";
                 else if (command == ShortMessage.NOTE_OFF) msgType = "NOTE_OFF";
-                else msgType = "CTRL";
-                logMidi(String.format("📨 %s ch=%d n=%d v=%d", msgType, sm.getChannel(), note, velocity));
+                else msgType = "OTHER";
+                logMidi("📩 MIDI raw: " + msgType + " ch=" + sm.getChannel() +
+                        " note=" + note + " vel=" + velocity);
+            }
+
+            // Пересылаем на выход (физический или синтезатор)
+            if (isRunning && outputReceiver != null) {
+                outputReceiver.send(message, timeStamp);
+                if (message instanceof ShortMessage && ((ShortMessage) message).getCommand() == ShortMessage.NOTE_ON) {
+                    logMidi("🔊 Перенаправлено на выход");
+                }
             }
 
             if (!isRunning) return;
@@ -751,10 +840,8 @@ public class VocalTrainer extends JFrame {
                         }
                         midiNoteLabel.setText(noteToName(note));
                         midiVelocityLabel.setText("громкость: " + velocity);
+                        logMidi("🎹 NOTE ON: " + noteToName(note) + " (MIDI " + note + "), velocity=" + velocity);
                     });
-
-                    playMidiNote(note, velocity);
-
                 } else if (command == ShortMessage.NOTE_OFF ||
                         (command == ShortMessage.NOTE_ON && velocity == 0)) {
                     if (currentMidiNote != null && currentMidiNote.equals(note)) {
@@ -765,43 +852,10 @@ public class VocalTrainer extends JFrame {
                             midiVelocityLabel.setText("громкость: —");
                         });
                     }
-                    stopMidiNote(note);
+                    logMidi("🎹 NOTE OFF: " + noteToName(note) + " (MIDI " + note + ")");
                 }
             }
         }
-
-        private void playMidiNote(int note, int velocity) {
-            if (midiOutputReceiver != null) {
-                try {
-                    ShortMessage msg = new ShortMessage();
-                    msg.setMessage(ShortMessage.NOTE_ON, 0, note, velocity);
-                    midiOutputReceiver.send(msg, -1);
-                    logMidi("🔊 Внешний синтезатор: NOTE_ON " + noteToName(note));
-                } catch (InvalidMidiDataException e) {
-                    logMidi("❌ Ошибка отправки MIDI: " + e.getMessage());
-                }
-            } else if (javaMidiChannel != null) {
-                javaMidiChannel.noteOn(note, velocity);
-                logMidi("🔊 Java Synthesizer: NOTE_ON " + noteToName(note));
-                new Timer(2000, e -> javaMidiChannel.noteOff(note)).start();
-            }
-        }
-
-        private void stopMidiNote(int note) {
-            if (midiOutputReceiver != null) {
-                try {
-                    ShortMessage msg = new ShortMessage();
-                    msg.setMessage(ShortMessage.NOTE_OFF, 0, note, 0);
-                    midiOutputReceiver.send(msg, -1);
-                } catch (InvalidMidiDataException e) {
-                    logMidi("❌ Ошибка отправки MIDI OFF: " + e.getMessage());
-                }
-            }
-            if (javaMidiChannel != null) {
-                javaMidiChannel.noteOff(note);
-            }
-        }
-
         @Override
         public void close() {}
     }
@@ -962,15 +1016,18 @@ public class VocalTrainer extends JFrame {
 
             String[] noteNames = {"C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"};
 
+            // Клавиши
             for (int i = 0; i <= noteRange; i++) {
                 int midi = minMidi + i;
                 int y0 = h - (int) ((i + 1) * noteHeight);
                 int y1 = h - (int) (i * noteHeight);
                 int height = y1 - y0;
+
                 boolean isSharp = (midi % 12 == 1 || midi % 12 == 3 || midi % 12 == 6 ||
                         midi % 12 == 8 || midi % 12 == 10);
                 g2.setColor(isSharp ? new Color(34, 34, 34) : new Color(68, 68, 68));
                 g2.fillRect(0, y0, w, height);
+
                 if (!isSharp) {
                     g2.setColor(Color.WHITE);
                     g2.setFont(new Font("Arial", Font.BOLD, 11));
@@ -1013,96 +1070,6 @@ public class VocalTrainer extends JFrame {
                         0, new float[]{7, 4}, 0));
                 g2.drawLine(0, y, w, y);
             }
-        }
-    }
-
-    // -----------------------------------------------------------------------
-    // -------------------  MIDI МОНИТОР (отдельное окно)  -------------------
-    // -----------------------------------------------------------------------
-    private class MidiMonitorFrame extends JFrame {
-        private JTextArea monitorArea;
-        private JCheckBox pauseCheck;
-        private boolean paused = false;
-
-        MidiMonitorFrame() {
-            super("📡 MIDI Monitor");
-            setSize(700, 500);
-            setLocationRelativeTo(VocalTrainer.this);
-            setDefaultCloseOperation(JFrame.DISPOSE_ON_CLOSE);
-            initMonitorUI();
-        }
-
-        private void initMonitorUI() {
-            JPanel mainPanel = new JPanel(new BorderLayout());
-            mainPanel.setBackground(new Color(20, 20, 20));
-
-            monitorArea = new JTextArea();
-            monitorArea.setEditable(false);
-            monitorArea.setBackground(new Color(10, 10, 10));
-            monitorArea.setForeground(new Color(0, 255, 100));
-            monitorArea.setFont(new Font("Courier New", Font.PLAIN, 12));
-            JScrollPane scrollPane = new JScrollPane(monitorArea);
-            mainPanel.add(scrollPane, BorderLayout.CENTER);
-
-            JPanel controlPanel = new JPanel(new FlowLayout(FlowLayout.LEFT));
-            controlPanel.setBackground(new Color(40, 40, 40));
-            pauseCheck = new JCheckBox("Пауза");
-            pauseCheck.setForeground(Color.WHITE);
-            pauseCheck.setBackground(new Color(40, 40, 40));
-            pauseCheck.addActionListener(e -> paused = pauseCheck.isSelected());
-            controlPanel.add(pauseCheck);
-
-            JButton clearBtn = new JButton("Очистить");
-            clearBtn.addActionListener(e -> monitorArea.setText(""));
-            controlPanel.add(clearBtn);
-
-            mainPanel.add(controlPanel, BorderLayout.NORTH);
-            add(mainPanel);
-        }
-
-        public void addMessage(MidiMessage message, long timestamp) {
-            if (paused) return;
-            StringBuilder sb = new StringBuilder();
-            sb.append(String.format("[%10d] ", timestamp));
-
-            if (message instanceof ShortMessage) {
-                ShortMessage sm = (ShortMessage) message;
-                int cmd = sm.getCommand();
-                int ch = sm.getChannel();
-                int d1 = sm.getData1();
-                int d2 = sm.getData2();
-
-                if (cmd == ShortMessage.NOTE_ON) {
-                    sb.append(String.format("NOTE ON   ch=%2d note=%3d(%s) vel=%3d",
-                            ch, d1, noteToName(d1), d2));
-                } else if (cmd == ShortMessage.NOTE_OFF) {
-                    sb.append(String.format("NOTE OFF  ch=%2d note=%3d(%s) vel=%3d",
-                            ch, d1, noteToName(d1), d2));
-                } else if (cmd == ShortMessage.CONTROL_CHANGE) {
-                    sb.append(String.format("CTRL CHG  ch=%2d ctrl=%3d val=%3d", ch, d1, d2));
-                } else if (cmd == ShortMessage.PITCH_BEND) {
-                    int bend = (d2 << 7) | d1;
-                    sb.append(String.format("PITCH BEND ch=%2d value=%5d", ch, bend));
-                } else if (cmd == ShortMessage.PROGRAM_CHANGE) {
-                    sb.append(String.format("PROG CHG  ch=%2d prog=%3d", ch, d1));
-                } else if (cmd == ShortMessage.CHANNEL_PRESSURE) {
-                    sb.append(String.format("CH PRESSURE ch=%2d pressure=%3d", ch, d1));
-                } else {
-                    sb.append(String.format("UNKNOWN    status=0x%02X data=%d,%d", cmd, d1, d2));
-                }
-            } else if (message instanceof SysexMessage) {
-                sb.append("SYSEX ...");
-            } else if (message instanceof MetaMessage) {
-                sb.append("META ...");
-            } else {
-                sb.append("UNKNOWN MESSAGE");
-            }
-
-            String line = sb.toString();
-            SwingUtilities.invokeLater(() -> {
-                monitorArea.append(line + "\n");
-                monitorArea.setCaretPosition(monitorArea.getDocument().getLength());
-            });
         }
     }
 }
