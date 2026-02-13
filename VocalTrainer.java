@@ -52,7 +52,7 @@ public class VocalTrainer extends JFrame {
     // MIDI вход
     private MidiDevice midiInputDevice;
     private Transmitter midiTransmitter;
-    private MidiRouter midiRouter;               // наш маршрутизатор
+    private MidiRouter midiRouter;
     private volatile Integer currentMidiNote = null;
     private volatile Integer currentMidiVelocity = null;
 
@@ -60,7 +60,7 @@ public class VocalTrainer extends JFrame {
     private Synthesizer synthesizer;
     private Receiver synthReceiver;
     private MidiDevice midiOutputDevice;
-    private Receiver outputReceiver;               // общий приёмник для выхода
+    private Receiver outputReceiver;
 
     // Визуализация и скролл
     private PianoRollPanel pianoPanel;
@@ -87,6 +87,10 @@ public class VocalTrainer extends JFrame {
 
     private Timer repaintTimer;
     private Timer scrollTimer;
+
+    // Списки MIDI устройств для точного выбора
+    private List<MidiDevice.Info> midiInputInfos = new ArrayList<>();
+    private List<MidiDevice.Info> midiOutputInfos = new ArrayList<>();
 
     // -----------------------------------------------------------------------
     public VocalTrainer() {
@@ -144,7 +148,7 @@ public class VocalTrainer extends JFrame {
             MidiChannel[] channels = synthesizer.getChannels();
             for (MidiChannel ch : channels) {
                 if (ch != null) {
-                    ch.programChange(0); // Acoustic Grand Piano
+                    ch.programChange(0);
                 }
             }
             synthReceiver = synthesizer.getReceiver();
@@ -518,27 +522,47 @@ public class VocalTrainer extends JFrame {
         audioInputCombo.setModel(new DefaultComboBoxModel<>(micNames.toArray(new String[0])));
         audioOutputCombo.setModel(new DefaultComboBoxModel<>(spkNames.toArray(new String[0])));
 
-        // MIDI
+        // MIDI устройства с сохранением Info
         MidiDevice.Info[] midiInfos = MidiSystem.getMidiDeviceInfo();
-        List<String> midiInputNames = new ArrayList<>();
-        List<String> midiOutputNames = new ArrayList<>();
+        midiInputInfos.clear();
+        midiOutputInfos.clear();
+        List<String> midiInputDisplay = new ArrayList<>();
+        List<String> midiOutputDisplay = new ArrayList<>();
+
+        logMidi("🔍 Сканирование MIDI устройств:");
         for (MidiDevice.Info info : midiInfos) {
             try {
                 MidiDevice dev = MidiSystem.getMidiDevice(info);
-                if (dev.getMaxTransmitters() != 0) {
-                    midiInputNames.add(info.getName());
+                int maxTx = dev.getMaxTransmitters();
+                int maxRx = dev.getMaxReceivers();
+                String desc = info.getName() + " (tx=" + maxTx + ", rx=" + maxRx + ")";
+                logMidi("   " + desc);
+                // Для входа: устройство должно уметь передавать (maxTx != 0)
+                if (maxTx != 0) {
+                    midiInputInfos.add(info);
+                    midiInputDisplay.add(desc);
                 }
-                if (dev.getMaxReceivers() != 0 && !(dev instanceof Synthesizer)) {
-                    midiOutputNames.add(info.getName());
+                // Для выхода: устройство должно уметь принимать (maxRx != 0), исключаем синтезатор Gervill (он дублируется)
+                if (maxRx != 0 && !(dev instanceof Synthesizer && info.getName().equals("Gervill"))) {
+                    midiOutputInfos.add(info);
+                    midiOutputDisplay.add(desc);
                 }
-            } catch (MidiUnavailableException ignored) {}
+            } catch (MidiUnavailableException ignored) {
+                logMidi("   ❌ " + info.getName() + " недоступно");
+            }
         }
 
-        if (midiInputNames.isEmpty()) midiInputNames.add("❌ MIDI входы не найдены");
-        midiInCombo.setModel(new DefaultComboBoxModel<>(midiInputNames.toArray(new String[0])));
+        if (midiInputDisplay.isEmpty()) {
+            midiInputDisplay.add("❌ MIDI входы не найдены");
+            midiInputInfos.clear();
+        }
+        midiInCombo.setModel(new DefaultComboBoxModel<>(midiInputDisplay.toArray(new String[0])));
 
-        if (midiOutputNames.isEmpty()) midiOutputNames.add("❌ MIDI выходы не найдены");
-        midiOutCombo.setModel(new DefaultComboBoxModel<>(midiOutputNames.toArray(new String[0])));
+        if (midiOutputDisplay.isEmpty()) {
+            midiOutputDisplay.add("❌ MIDI выходы не найдены");
+            midiOutputInfos.clear();
+        }
+        midiOutCombo.setModel(new DefaultComboBoxModel<>(midiOutputDisplay.toArray(new String[0])));
 
         logMidi("✅ Список устройств обновлён.");
     }
@@ -586,57 +610,56 @@ public class VocalTrainer extends JFrame {
         if (synthReceiver == null) {
             initSynthesizer();
         }
-        final Receiver[] testReceiver = new Receiver[1];
-        final MidiDevice[] tempDevice = new MidiDevice[1];
         try {
             if (physicalOutRadio.isSelected()) {
-                String outName = (String) midiOutCombo.getSelectedItem();
-                if (outName == null || outName.contains("❌")) {
+                int outIdx = midiOutCombo.getSelectedIndex();
+                if (outIdx < 0 || outIdx >= midiOutputInfos.size()) {
                     JOptionPane.showMessageDialog(this, "Выберите физический MIDI выход", "Ошибка", JOptionPane.ERROR_MESSAGE);
                     return;
                 }
-                MidiDevice.Info[] infos = MidiSystem.getMidiDeviceInfo();
-                for (MidiDevice.Info info : infos) {
-                    if (info.getName().equals(outName)) {
-                        tempDevice[0] = MidiSystem.getMidiDevice(info);
-                        tempDevice[0].open();
-                        testReceiver[0] = tempDevice[0].getReceiver();
-                        break;
+                MidiDevice.Info info = midiOutputInfos.get(outIdx);
+                MidiDevice tempDevice = MidiSystem.getMidiDevice(info);
+                tempDevice.open();
+                Receiver tempReceiver = tempDevice.getReceiver();
+                ShortMessage onMsg = new ShortMessage();
+                onMsg.setMessage(ShortMessage.NOTE_ON, 0, 69, 100);
+                tempReceiver.send(onMsg, -1);
+                logMidi("🎹 Тест MIDI отправлен (нота Ля) на " + info.getName());
+
+                // Таймер для NOTE_OFF и закрытия
+                final Receiver rec = tempReceiver;
+                final MidiDevice dev = tempDevice;
+                new Timer(500, e -> {
+                    try {
+                        ShortMessage offMsg = new ShortMessage();
+                        offMsg.setMessage(ShortMessage.NOTE_OFF, 0, 69, 0);
+                        rec.send(offMsg, -1);
+                    } catch (InvalidMidiDataException ex) {
+                        logMidi("❌ Ошибка NOTE_OFF: " + ex.getMessage());
+                    } catch (IllegalStateException ex) {
+                        logMidi("❌ Receiver уже закрыт: " + ex.getMessage());
+                    } finally {
+                        rec.close();
+                        dev.close();
                     }
-                }
-                if (testReceiver[0] == null) {
-                    logMidi("❌ Не удалось открыть физический MIDI выход");
-                    return;
-                }
+                }).start();
             } else {
-                if (synthReceiver == null) {
-                    logMidi("❌ Синтезатор не доступен");
-                    return;
-                }
-                testReceiver[0] = synthReceiver;
-            }
-
-            ShortMessage onMsg = new ShortMessage();
-            onMsg.setMessage(ShortMessage.NOTE_ON, 0, 69, 100);
-            testReceiver[0].send(onMsg, -1);
-            logMidi("🎹 Тест MIDI отправлен (нота Ля)");
-
-            new Timer(500, e -> {
-                try {
-                    ShortMessage offMsg = new ShortMessage();
-                    offMsg.setMessage(ShortMessage.NOTE_OFF, 0, 69, 0);
-                    testReceiver[0].send(offMsg, -1);
-                    if (tempDevice[0] != null) {
-                        tempDevice[0].close();
+                ShortMessage onMsg = new ShortMessage();
+                onMsg.setMessage(ShortMessage.NOTE_ON, 0, 69, 100);
+                synthReceiver.send(onMsg, -1);
+                logMidi("🎹 Тест MIDI отправлен (нота Ля) на синтезатор");
+                new Timer(500, e -> {
+                    try {
+                        ShortMessage offMsg = new ShortMessage();
+                        offMsg.setMessage(ShortMessage.NOTE_OFF, 0, 69, 0);
+                        synthReceiver.send(offMsg, -1);
+                    } catch (InvalidMidiDataException ex) {
+                        logMidi("❌ Ошибка NOTE_OFF: " + ex.getMessage());
                     }
-                } catch (InvalidMidiDataException ex) {
-                    logMidi("❌ Ошибка NOTE_OFF: " + ex.getMessage());
-                }
-            }).start();
-
+                }).start();
+            }
         } catch (Exception e) {
             logMidi("❌ Ошибка теста MIDI: " + e.getMessage());
-            if (tempDevice[0] != null) tempDevice[0].close();
         }
     }
 
@@ -672,26 +695,30 @@ public class VocalTrainer extends JFrame {
         }
 
         // ---- MIDI вход ----
-        String midiInName = (String) midiInCombo.getSelectedItem();
-        if (midiInName != null && !midiInName.contains("❌")) {
+        int midiInIdx = midiInCombo.getSelectedIndex();
+        if (midiInIdx >= 0 && midiInIdx < midiInputInfos.size()) {
+            MidiDevice.Info info = midiInputInfos.get(midiInIdx);
             try {
-                MidiDevice.Info[] infos = MidiSystem.getMidiDeviceInfo();
-                for (MidiDevice.Info info : infos) {
-                    if (info.getName().equals(midiInName)) {
-                        midiInputDevice = MidiSystem.getMidiDevice(info);
-                        midiInputDevice.open();
-                        logMidi("🔧 MIDI вход открыт: " + midiInName);
-
-                        // Создаём маршрутизатор
-                        midiRouter = new MidiRouter();
-                        midiTransmitter = midiInputDevice.getTransmitter();
-                        midiTransmitter.setReceiver(midiRouter);
-                        logMidi("✅ MIDI вход подключён к маршрутизатору");
-                        break;
-                    }
+                midiInputDevice = MidiSystem.getMidiDevice(info);
+                int maxTx = midiInputDevice.getMaxTransmitters();
+                logMidi("🔧 MIDI вход: " + info.getName() + ", maxTransmitters=" + maxTx);
+                if (maxTx == 0) {
+                    logMidi("⚠️ Устройство имеет maxTransmitters=0, но попробуем открыть...");
                 }
+                midiInputDevice.open();
+                logMidi("🔧 MIDI вход открыт: " + info.getName());
+
+                midiRouter = new MidiRouter();
+                midiTransmitter = midiInputDevice.getTransmitter();
+                midiTransmitter.setReceiver(midiRouter);
+                logMidi("✅ MIDI вход подключён к маршрутизатору");
             } catch (MidiUnavailableException e) {
                 logMidi("❌ Не удалось открыть MIDI вход: " + e.getMessage());
+                if (midiInputDevice != null) {
+                    midiInputDevice.close();
+                    midiInputDevice = null;
+                }
+                midiRouter = null;
             }
         } else {
             logMidi("⚠️ MIDI вход не выбран");
@@ -699,19 +726,14 @@ public class VocalTrainer extends JFrame {
 
         // ---- MIDI выход ----
         if (physicalOutRadio.isSelected()) {
-            String midiOutName = (String) midiOutCombo.getSelectedItem();
-            if (midiOutName != null && !midiOutName.contains("❌")) {
+            int midiOutIdx = midiOutCombo.getSelectedIndex();
+            if (midiOutIdx >= 0 && midiOutIdx < midiOutputInfos.size()) {
+                MidiDevice.Info info = midiOutputInfos.get(midiOutIdx);
                 try {
-                    MidiDevice.Info[] infos = MidiSystem.getMidiDeviceInfo();
-                    for (MidiDevice.Info info : infos) {
-                        if (info.getName().equals(midiOutName)) {
-                            midiOutputDevice = MidiSystem.getMidiDevice(info);
-                            midiOutputDevice.open();
-                            outputReceiver = midiOutputDevice.getReceiver();
-                            logMidi("✅ Физический MIDI выход открыт: " + midiOutName);
-                            break;
-                        }
-                    }
+                    midiOutputDevice = MidiSystem.getMidiDevice(info);
+                    midiOutputDevice.open();
+                    outputReceiver = midiOutputDevice.getReceiver();
+                    logMidi("✅ Физический MIDI выход открыт: " + info.getName());
                 } catch (MidiUnavailableException e) {
                     logMidi("❌ Не удалось открыть физический MIDI выход: " + e.getMessage());
                 }
@@ -792,7 +814,6 @@ public class VocalTrainer extends JFrame {
     }
 
     // -----------------------------------------------------------------------
-    // Внутренний класс - маршрутизатор MIDI (аналогично MidiMonitorApp)
     private class MidiRouter implements Receiver {
         private Receiver outputReceiver;
 
@@ -819,9 +840,13 @@ public class VocalTrainer extends JFrame {
 
             // Пересылаем на выход, если есть
             if (isRunning && outputReceiver != null) {
-                outputReceiver.send(message, timeStamp);
-                if (message instanceof ShortMessage && ((ShortMessage) message).getCommand() == ShortMessage.NOTE_ON) {
-                    logMidi("🔊 Перенаправлено на выход");
+                try {
+                    outputReceiver.send(message, timeStamp);
+                    if (message instanceof ShortMessage && ((ShortMessage) message).getCommand() == ShortMessage.NOTE_ON) {
+                        logMidi("🔊 Перенаправлено на выход");
+                    }
+                } catch (IllegalStateException e) {
+                    logMidi("❌ Ошибка отправки: receiver закрыт");
                 }
             } else {
                 if (!isRunning) logMidi("⏸️ Пропущено: isRunning=false");
