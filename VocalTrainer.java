@@ -197,17 +197,17 @@ public class VocalTrainer extends JFrame {
         title.setBorder(BorderFactory.createEmptyBorder(10, 0, 10, 0));
         topPanel.add(title, BorderLayout.NORTH);
 
-        // Компактная панель с иконками
+        // Компактная панель с иконками (теперь с контрастными кнопками)
         JPanel iconPanel = new JPanel(new FlowLayout(FlowLayout.RIGHT, 5, 0));
         iconPanel.setBackground(new Color(26, 26, 26));
         iconPanel.setBorder(BorderFactory.createEmptyBorder(0, 0, 5, 10));
 
-        // Кнопка настроек с иконкой
+        // Кнопка настроек с иконкой (светлый фон, тёмный текст)
         toggleSettingsBtn = new JButton("⚙️");
         toggleSettingsBtn.setFont(new Font("Segoe UI", Font.PLAIN, 20));
         toggleSettingsBtn.setToolTipText("Показать/скрыть настройки");
-        toggleSettingsBtn.setBackground(new Color(70, 70, 70));
-        toggleSettingsBtn.setForeground(Color.WHITE);
+        toggleSettingsBtn.setBackground(new Color(220, 220, 220)); // светлый фон
+        toggleSettingsBtn.setForeground(new Color(30, 30, 30));    // тёмный текст
         toggleSettingsBtn.setFocusPainted(false);
         toggleSettingsBtn.setPreferredSize(new Dimension(40, 40));
         toggleSettingsBtn.addActionListener(e -> {
@@ -216,12 +216,12 @@ public class VocalTrainer extends JFrame {
         });
         iconPanel.add(toggleSettingsBtn);
 
-        // Кнопка виртуального пианино с иконкой
+        // Кнопка виртуального пианино с иконкой (светлый фон, тёмный текст)
         virtualPianoBtn = new JButton("🎹");
         virtualPianoBtn.setFont(new Font("Segoe UI", Font.PLAIN, 20));
         virtualPianoBtn.setToolTipText("Открыть виртуальное пианино");
-        virtualPianoBtn.setBackground(new Color(70, 70, 70));
-        virtualPianoBtn.setForeground(Color.WHITE);
+        virtualPianoBtn.setBackground(new Color(220, 220, 220));
+        virtualPianoBtn.setForeground(new Color(30, 30, 30));
         virtualPianoBtn.setFocusPainted(false);
         virtualPianoBtn.setPreferredSize(new Dimension(40, 40));
         virtualPianoBtn.addActionListener(e -> showVirtualPiano());
@@ -888,7 +888,6 @@ public class VocalTrainer extends JFrame {
         pianoPanel.repaint();
 
         SwingUtilities.invokeLater(() -> {
-            // Защита от NullPointerException (на случай, если компоненты ещё не созданы)
             if (midiNoteLabel != null) midiNoteLabel.setText("—");
             if (midiVelocityLabel != null) midiVelocityLabel.setText("громкость: —");
             if (vocalLabel != null) vocalLabel.setText("—");
@@ -1187,25 +1186,30 @@ public class VocalTrainer extends JFrame {
 }
 
 // =====================================================================
-// Виртуальная пианино-клавиатура (исправленная)
+// Виртуальная пианино-клавиатура (исправленная и улучшенная)
 // =====================================================================
 class VirtualPianoFrame extends JFrame {
     private final VocalTrainer parent;
     private VirtualPianoPanel pianoPanel;
     private int octave = 4;
+    private JCheckBox alwaysOnTopCheck;
 
     public VirtualPianoFrame(VocalTrainer parent) {
         super("Виртуальное пианино");
         this.parent = parent;
         setDefaultCloseOperation(JFrame.DISPOSE_ON_CLOSE);
-        setSize(800, 300);
+        setSize(800, 350);
         setLocationRelativeTo(parent);
 
         pianoPanel = new VirtualPianoPanel(parent);
         add(pianoPanel, BorderLayout.CENTER);
 
-        JPanel controlPanel = new JPanel();
+        // Нижняя панель с элементами управления
+        JPanel controlPanel = new JPanel(new BorderLayout());
         controlPanel.setBackground(new Color(60, 60, 60));
+
+        JPanel octavePanel = new JPanel(new FlowLayout());
+        octavePanel.setBackground(new Color(60, 60, 60));
         JButton octDown = new JButton("Октава -");
         octDown.addActionListener(e -> {
             if (octave > 0) {
@@ -1222,8 +1226,22 @@ class VirtualPianoFrame extends JFrame {
                 parent.setVirtualOctave(octave);
             }
         });
-        controlPanel.add(octDown);
-        controlPanel.add(octUp);
+        octavePanel.add(octDown);
+        octavePanel.add(octUp);
+
+        JPanel topPanel = new JPanel(new FlowLayout(FlowLayout.RIGHT));
+        topPanel.setBackground(new Color(60, 60, 60));
+        alwaysOnTopCheck = new JCheckBox("📌 Поверх всех");
+        alwaysOnTopCheck.setForeground(Color.WHITE);
+        alwaysOnTopCheck.setBackground(new Color(60, 60, 60));
+        alwaysOnTopCheck.addActionListener(e -> {
+            setAlwaysOnTop(alwaysOnTopCheck.isSelected());
+        });
+        topPanel.add(alwaysOnTopCheck);
+
+        controlPanel.add(octavePanel, BorderLayout.WEST);
+        controlPanel.add(topPanel, BorderLayout.EAST);
+
         add(controlPanel, BorderLayout.SOUTH);
 
         addKeyListener(new KeyAdapter() {
@@ -1274,19 +1292,17 @@ class VirtualPianoPanel extends JPanel {
         setFocusable(true);
 
         // Вычисляем позиции чёрных клавиш (для двух октав)
-        // В каждой октаве 5 чёрных клавиш: после C (индекс 0), после D (1), после F (3), после G (4), после A (5)
         for (int oct = 0; oct < 2; oct++) {
-            int baseWhite = oct * 7; // индекс первой белой клавиши в октаве
-            int[] offsets = {1, 3, 6, 8, 10}; // смещения в полутонах
+            int baseWhite = oct * 7;
+            int[] offsets = {1, 3, 6, 8, 10};
             for (int i = 0; i < 5; i++) {
                 int blackIdx = oct * 5 + i;
-                // белая клавиша, после которой идёт чёрная:
                 int whiteIndex;
-                if (i == 0) whiteIndex = baseWhite;      // после C
-                else if (i == 1) whiteIndex = baseWhite + 1; // после D
-                else if (i == 2) whiteIndex = baseWhite + 3; // после F
-                else if (i == 3) whiteIndex = baseWhite + 4; // после G
-                else whiteIndex = baseWhite + 5;            // после A
+                if (i == 0) whiteIndex = baseWhite;
+                else if (i == 1) whiteIndex = baseWhite + 1;
+                else if (i == 2) whiteIndex = baseWhite + 3;
+                else if (i == 3) whiteIndex = baseWhite + 4;
+                else whiteIndex = baseWhite + 5;
                 blackXPositions[blackIdx] = (whiteIndex + 1) * whiteKeyWidth - blackKeyWidth / 2;
             }
         }
@@ -1305,17 +1321,34 @@ class VirtualPianoPanel extends JPanel {
 
     public void setOctave(int octave) {
         this.octave = octave;
+        // Сбрасываем все нажатые клавиши, чтобы избежать залипания
+        resetAllKeys();
         repaint();
     }
 
+    private void resetAllKeys() {
+        for (int i = 0; i < whiteKeys; i++) {
+            if (whitePressed[i]) {
+                whitePressed[i] = false;
+                int note = getMidiForWhiteKey(i);
+                sendNote(note, 0);
+            }
+        }
+        for (int i = 0; i < blackKeys; i++) {
+            if (blackPressed[i]) {
+                blackPressed[i] = false;
+                int note = getMidiForBlackKey(i);
+                sendNote(note, 0);
+            }
+        }
+    }
+
     private int getMidiNoteFromPos(int x, int y) {
-        // Сначала проверим, не попали ли на чёрную клавишу
         for (int i = 0; i < blackKeys; i++) {
             if (x >= blackXPositions[i] && x < blackXPositions[i] + blackKeyWidth && y < blackKeyHeight) {
                 return getMidiForBlackKey(i);
             }
         }
-        // Иначе определяем белую клавишу
         int whiteIndex = x / whiteKeyWidth;
         if (whiteIndex >= 0 && whiteIndex < whiteKeys) {
             return getMidiForWhiteKey(whiteIndex);
@@ -1324,24 +1357,21 @@ class VirtualPianoPanel extends JPanel {
     }
 
     private int getMidiForWhiteKey(int index) {
-        // index: 0..13
         int noteInOctave;
         int octaveOffset;
         if (index < 7) {
-            // первая октава
             octaveOffset = octave;
             switch (index % 7) {
-                case 0: noteInOctave = 0; break; // C
-                case 1: noteInOctave = 2; break; // D
-                case 2: noteInOctave = 4; break; // E
-                case 3: noteInOctave = 5; break; // F
-                case 4: noteInOctave = 7; break; // G
-                case 5: noteInOctave = 9; break; // A
-                case 6: noteInOctave = 11; break; // B
+                case 0: noteInOctave = 0; break;
+                case 1: noteInOctave = 2; break;
+                case 2: noteInOctave = 4; break;
+                case 3: noteInOctave = 5; break;
+                case 4: noteInOctave = 7; break;
+                case 5: noteInOctave = 9; break;
+                case 6: noteInOctave = 11; break;
                 default: noteInOctave = 0;
             }
         } else {
-            // вторая октава
             octaveOffset = octave + 1;
             switch ((index - 7) % 7) {
                 case 0: noteInOctave = 0; break;
@@ -1358,21 +1388,20 @@ class VirtualPianoPanel extends JPanel {
     }
 
     private int getMidiForBlackKey(int index) {
-        // index: 0..9
         int noteInOctave;
         int octaveOffset;
-        int localIdx = index % 5; // 0..4 внутри октавы
+        int localIdx = index % 5;
         if (index < 5) {
             octaveOffset = octave;
         } else {
             octaveOffset = octave + 1;
         }
         switch (localIdx) {
-            case 0: noteInOctave = 1; break; // C#
-            case 1: noteInOctave = 3; break; // D#
-            case 2: noteInOctave = 6; break; // F#
-            case 3: noteInOctave = 8; break; // G#
-            case 4: noteInOctave = 10; break; // A#
+            case 0: noteInOctave = 1; break;
+            case 1: noteInOctave = 3; break;
+            case 2: noteInOctave = 6; break;
+            case 3: noteInOctave = 8; break;
+            case 4: noteInOctave = 10; break;
             default: noteInOctave = 0;
         }
         return octaveOffset * 12 + noteInOctave;
@@ -1381,7 +1410,6 @@ class VirtualPianoPanel extends JPanel {
     private void handleMousePress(int x, int y, boolean press) {
         int note = getMidiNoteFromPos(x, y);
         if (note != -1) {
-            // Определяем, какая клавиша нажата, чтобы обновить состояние
             boolean found = false;
             for (int i = 0; i < blackKeys && !found; i++) {
                 if (x >= blackXPositions[i] && x < blackXPositions[i] + blackKeyWidth && y < blackKeyHeight) {
@@ -1409,6 +1437,7 @@ class VirtualPianoPanel extends JPanel {
                     whitePressed[i] = true;
                     int note = getMidiForWhiteKey(i);
                     sendNote(note, 100);
+                    repaint();
                 }
                 break;
             }
@@ -1416,11 +1445,11 @@ class VirtualPianoPanel extends JPanel {
         // Чёрные клавиши
         for (int i = 0; i < blackKeyChars.length; i++) {
             if (key == blackKeyChars[i]) {
-                // Нажата чёрная клавиша в первой октаве (индексы 0-4)
                 if (!blackPressed[i]) {
                     blackPressed[i] = true;
                     int note = getMidiForBlackKey(i);
                     sendNote(note, 100);
+                    repaint();
                 }
                 break;
             }
@@ -1429,14 +1458,14 @@ class VirtualPianoPanel extends JPanel {
         if (e.getKeyCode() == KeyEvent.VK_Z) {
             if (octave > 0) {
                 octave--;
+                setOctave(octave);
                 parent.setVirtualOctave(octave);
-                repaint();
             }
         } else if (e.getKeyCode() == KeyEvent.VK_X) {
             if (octave < 8) {
                 octave++;
+                setOctave(octave);
                 parent.setVirtualOctave(octave);
-                repaint();
             }
         }
     }
@@ -1449,6 +1478,7 @@ class VirtualPianoPanel extends JPanel {
                     whitePressed[i] = false;
                     int note = getMidiForWhiteKey(i);
                     sendNote(note, 0);
+                    repaint();
                 }
                 break;
             }
@@ -1459,6 +1489,7 @@ class VirtualPianoPanel extends JPanel {
                     blackPressed[i] = false;
                     int note = getMidiForBlackKey(i);
                     sendNote(note, 0);
+                    repaint();
                 }
                 break;
             }
@@ -1510,11 +1541,21 @@ class VirtualPianoPanel extends JPanel {
             g2.fillRect(x, 0, whiteKeyWidth - 1, whiteKeyHeight);
             g2.setColor(Color.BLACK);
             g2.drawRect(x, 0, whiteKeyWidth - 1, whiteKeyHeight);
+
+            // Название ноты
             int note = getMidiForWhiteKey(i);
             String noteName = parent.noteToName(note);
             g2.setColor(Color.BLACK);
             g2.setFont(new Font("Arial", Font.PLAIN, 12));
-            g2.drawString(noteName, x + 5, whiteKeyHeight - 10);
+            g2.drawString(noteName, x + 5, whiteKeyHeight - 25);
+
+            // Подпись клавиши клавиатуры ПК (для первых 11 белых клавиш)
+            if (i < whiteKeyChars.length) {
+                String keyCap = String.valueOf(whiteKeyChars[i]).toUpperCase();
+                g2.setColor(Color.BLUE);
+                g2.setFont(new Font("Arial", Font.BOLD, 12));
+                g2.drawString(keyCap, x + 5, whiteKeyHeight - 10);
+            }
         }
 
         // Рисуем чёрные клавиши
@@ -1524,11 +1565,21 @@ class VirtualPianoPanel extends JPanel {
             g2.fillRect(x, 0, blackKeyWidth, blackKeyHeight);
             g2.setColor(Color.WHITE);
             g2.drawRect(x, 0, blackKeyWidth, blackKeyHeight);
+
+            // Название ноты
             int note = getMidiForBlackKey(i);
             String noteName = parent.noteToName(note);
             g2.setColor(Color.WHITE);
             g2.setFont(new Font("Arial", Font.PLAIN, 10));
-            g2.drawString(noteName, x + 5, blackKeyHeight - 10);
+            g2.drawString(noteName, x + 5, blackKeyHeight - 25);
+
+            // Подпись клавиши клавиатуры ПК (для первых 5 чёрных клавиш)
+            if (i < blackKeyChars.length) {
+                String keyCap = String.valueOf(blackKeyChars[i]).toUpperCase();
+                g2.setColor(Color.YELLOW);
+                g2.setFont(new Font("Arial", Font.BOLD, 10));
+                g2.drawString(keyCap, x + 5, blackKeyHeight - 10);
+            }
         }
 
         g2.setColor(Color.WHITE);
