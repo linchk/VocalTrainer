@@ -112,9 +112,7 @@ java VocalTrainer
 | MIDI notes not triggering | Click "🔄 Rescan" in settings after connecting MIDI device |
 | UI text appears as squares | Ensure system supports UTF-8; Windows users must run via `run.bat` |
 
-## 📜 License
 
-MIT License – see [LICENSE](LICENSE) for details.
 
 ---
 
