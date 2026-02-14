@@ -267,15 +267,12 @@ public class VocalTrainer extends JFrame {
         iconPanel.setBorder(BorderFactory.createEmptyBorder(0, 0, 5, 10));
 
         toggleSettingsBtn = new JButton("⚙");
-        toggleSettingsBtn.setFont(new Font("Segoe UI Emoji", Font.PLAIN, 20));
-        if (!toggleSettingsBtn.getFont().canDisplay('⚙')) {
-            toggleSettingsBtn.setFont(new Font("Arial Unicode MS", Font.PLAIN, 20));
-        }
+        toggleSettingsBtn.setFont(new Font("Arial MS", Font.PLAIN, 20));
         toggleSettingsBtn.setToolTipText(tr("menu.settings"));
         toggleSettingsBtn.setBackground(new Color(220, 220, 220));
         toggleSettingsBtn.setForeground(new Color(30, 30, 30));
         toggleSettingsBtn.setFocusPainted(false);
-        toggleSettingsBtn.setPreferredSize(new Dimension(40, 40));
+        toggleSettingsBtn.setPreferredSize(new Dimension(50, 50));
         toggleSettingsBtn.addActionListener(e -> {
             settingsPanel.setVisible(!settingsPanel.isVisible());
             toggleSettingsBtn.setToolTipText(settingsPanel.isVisible() ? tr("menu.settings") : tr("menu.settings"));
@@ -283,15 +280,15 @@ public class VocalTrainer extends JFrame {
         iconPanel.add(toggleSettingsBtn);
 
         virtualPianoBtn = new JButton("♫");
-        virtualPianoBtn.setFont(new Font("Segoe UI Emoji", Font.PLAIN, 20));
+        virtualPianoBtn.setFont(new Font("Arial MS", Font.PLAIN, 20));
         if (!virtualPianoBtn.getFont().canDisplay('♫')) {
-            virtualPianoBtn.setFont(new Font("Arial Unicode MS", Font.PLAIN, 20));
+            virtualPianoBtn.setFont(new Font("Arial Unicode MS", Font.PLAIN, 16));
         }
         virtualPianoBtn.setToolTipText(tr("menu.piano"));
         virtualPianoBtn.setBackground(new Color(220, 220, 220));
         virtualPianoBtn.setForeground(new Color(30, 30, 30));
         virtualPianoBtn.setFocusPainted(false);
-        virtualPianoBtn.setPreferredSize(new Dimension(40, 40));
+        virtualPianoBtn.setPreferredSize(new Dimension(50, 50));
         virtualPianoBtn.addActionListener(e -> showVirtualPiano());
         iconPanel.add(virtualPianoBtn);
 
@@ -306,7 +303,7 @@ public class VocalTrainer extends JFrame {
                 "⚙️ " + tr("settings.devices"),
                 TitledBorder.LEFT,
                 TitledBorder.TOP,
-                new Font("Arial", Font.BOLD, 12),
+                new Font("Arial MS", Font.BOLD, 12),
                 Color.WHITE
         ));
         GridBagConstraints gbc = new GridBagConstraints();
@@ -317,7 +314,7 @@ public class VocalTrainer extends JFrame {
         // Микрофон
         gbc.gridx = 0; gbc.gridy = 0; gbc.gridwidth = 1;
         JLabel micLabel = new JLabel("🎤 " + tr("settings.mic") + ":");
-        micLabel.setFont(new Font("Arial", Font.BOLD, 12));
+        micLabel.setFont(new Font("Arial MS", Font.BOLD, 12));
         micLabel.setForeground(Color.WHITE);
         settingsPanel.add(micLabel, gbc);
 
@@ -330,7 +327,7 @@ public class VocalTrainer extends JFrame {
         // Динамики
         gbc.gridx = 0; gbc.gridy = 1; gbc.gridwidth = 1;
         JLabel audioOutLabel = new JLabel("🔊 " + tr("settings.speakers") + ":");
-        audioOutLabel.setFont(new Font("Arial", Font.BOLD, 12));
+        audioOutLabel.setFont(new Font("Arial MS", Font.BOLD, 12));
         audioOutLabel.setForeground(Color.WHITE);
         settingsPanel.add(audioOutLabel, gbc);
 
@@ -342,7 +339,7 @@ public class VocalTrainer extends JFrame {
 
         gbc.gridx = 2;
         JButton testAudioBtn = new JButton("🔊 " + tr("settings.test"));
-        testAudioBtn.setFont(new Font("Arial", Font.BOLD, 11));
+        testAudioBtn.setFont(new Font("Arial MS", Font.BOLD, 11));
         testAudioBtn.setBackground(new Color(200, 200, 200));
         testAudioBtn.setForeground(new Color(30, 30, 30));
         testAudioBtn.setFocusPainted(false);
@@ -352,7 +349,7 @@ public class VocalTrainer extends JFrame {
         // MIDI вход
         gbc.gridx = 0; gbc.gridy = 2; gbc.gridwidth = 1;
         JLabel midiInLabel = new JLabel("🎹 " + tr("settings.midiIn") + ":");
-        midiInLabel.setFont(new Font("Arial", Font.BOLD, 12));
+        midiInLabel.setFont(new Font("Arial MS", Font.BOLD, 12));
         midiInLabel.setForeground(Color.WHITE);
         settingsPanel.add(midiInLabel, gbc);
 
@@ -364,7 +361,7 @@ public class VocalTrainer extends JFrame {
 
         gbc.gridx = 2;
         JButton rescanBtn = new JButton("🔄 " + tr("settings.refresh"));
-        rescanBtn.setFont(new Font("Arial", Font.BOLD, 11));
+        rescanBtn.setFont(new Font("Arial MS", Font.BOLD, 11));
         rescanBtn.setBackground(new Color(200, 200, 200));
         rescanBtn.setForeground(new Color(30, 30, 30));
         rescanBtn.setFocusPainted(false);
@@ -374,7 +371,7 @@ public class VocalTrainer extends JFrame {
         // Режим выхода
         gbc.gridx = 0; gbc.gridy = 3; gbc.gridwidth = 1;
         JLabel outModeLabel = new JLabel("🔊 " + tr("settings.midiOut") + ":");
-        outModeLabel.setFont(new Font("Arial", Font.BOLD, 12));
+        outModeLabel.setFont(new Font("Arial MS", Font.BOLD, 12));
         outModeLabel.setForeground(Color.WHITE);
         settingsPanel.add(outModeLabel, gbc);
 
@@ -401,7 +398,7 @@ public class VocalTrainer extends JFrame {
         // Физический MIDI выход
         gbc.gridx = 0; gbc.gridy = 4; gbc.gridwidth = 1;
         JLabel midiOutLabel = new JLabel("📤 " + tr("settings.midiOutPhysical"));
-        midiOutLabel.setFont(new Font("Arial", Font.BOLD, 12));
+        midiOutLabel.setFont(new Font("Arial MS", Font.BOLD, 12));
         midiOutLabel.setForeground(Color.WHITE);
         settingsPanel.add(midiOutLabel, gbc);
 
@@ -414,7 +411,7 @@ public class VocalTrainer extends JFrame {
 
         gbc.gridx = 2;
         JButton testMidiBtn = new JButton("🎹 " + tr("settings.midiTest"));
-        testMidiBtn.setFont(new Font("Arial", Font.BOLD, 11));
+        testMidiBtn.setFont(new Font("Arial MS", Font.BOLD, 11));
         testMidiBtn.setBackground(new Color(200, 200, 200));
         testMidiBtn.setForeground(new Color(30, 30, 30));
         testMidiBtn.setFocusPainted(false);
@@ -424,7 +421,7 @@ public class VocalTrainer extends JFrame {
         // Автопрокрутка
         gbc.gridx = 0; gbc.gridy = 5; gbc.gridwidth = 1;
         JLabel scrollLabel = new JLabel("🔄 " + tr("settings.autoScroll") + ":");
-        scrollLabel.setFont(new Font("Arial", Font.BOLD, 12));
+        scrollLabel.setFont(new Font("Arial MS", Font.BOLD, 12));
         scrollLabel.setForeground(Color.WHITE);
         settingsPanel.add(scrollLabel, gbc);
 
@@ -444,7 +441,7 @@ public class VocalTrainer extends JFrame {
         // Подробный лог
         gbc.gridx = 0; gbc.gridy = 6; gbc.gridwidth = 1;
         JLabel logLabel = new JLabel("📋 " + tr("settings.detailedLog") + ":");
-        logLabel.setFont(new Font("Arial", Font.BOLD, 12));
+        logLabel.setFont(new Font("Arial MS", Font.BOLD, 12));
         logLabel.setForeground(Color.WHITE);
         settingsPanel.add(logLabel, gbc);
 
@@ -460,7 +457,7 @@ public class VocalTrainer extends JFrame {
         // Выбор языка
         gbc.gridx = 0; gbc.gridy = 7; gbc.gridwidth = 1;
         JLabel langLabel = new JLabel("🌐 " + tr("settings.language") + ":");
-        langLabel.setFont(new Font("Arial", Font.BOLD, 12));
+        langLabel.setFont(new Font("Arial MS", Font.BOLD, 12));
         langLabel.setForeground(Color.WHITE);
         settingsPanel.add(langLabel, gbc);
 
@@ -511,7 +508,7 @@ public class VocalTrainer extends JFrame {
         JPanel vocalBox = new JPanel(new BorderLayout());
         vocalBox.setBackground(new Color(26, 26, 26));
         vocalLabel = new JLabel("—", SwingConstants.CENTER);
-        vocalLabel.setFont(new Font("Arial", Font.BOLD, 26));
+        vocalLabel.setFont(new Font("Arial MS", Font.BOLD, 26));
         vocalLabel.setForeground(new Color(0, 204, 255));
         vocalBox.add(vocalLabel, BorderLayout.CENTER);
         JLabel vocalDesc = new JLabel("🎤 " + tr("indicators.yourNote"), SwingConstants.CENTER);
@@ -523,7 +520,7 @@ public class VocalTrainer extends JFrame {
         JPanel targetBox = new JPanel(new BorderLayout());
         targetBox.setBackground(new Color(26, 26, 26));
         targetLabel = new JLabel("—", SwingConstants.CENTER);
-        targetLabel.setFont(new Font("Arial", Font.BOLD, 26));
+        targetLabel.setFont(new Font("Arial MS", Font.BOLD, 26));
         targetLabel.setForeground(new Color(255, 215, 0));
         targetBox.add(targetLabel, BorderLayout.CENTER);
         JLabel targetDesc = new JLabel("🎹 " + tr("indicators.target"), SwingConstants.CENTER);
@@ -535,7 +532,7 @@ public class VocalTrainer extends JFrame {
         JPanel devBox = new JPanel(new BorderLayout());
         devBox.setBackground(new Color(26, 26, 26));
         deviationLabel = new JLabel("—", SwingConstants.CENTER);
-        deviationLabel.setFont(new Font("Arial", Font.BOLD, 26));
+        deviationLabel.setFont(new Font("Arial MS", Font.BOLD, 26));
         deviationLabel.setForeground(new Color(170, 170, 170));
         devBox.add(deviationLabel, BorderLayout.CENTER);
         JLabel devDesc = new JLabel("📏 " + tr("indicators.deviation"), SwingConstants.CENTER);
@@ -573,7 +570,7 @@ public class VocalTrainer extends JFrame {
         controlPanel.setBorder(BorderFactory.createEmptyBorder(5, 0, 15, 0));
 
         startBtn = new JButton("▶️ " + tr("buttons.start"));
-        startBtn.setFont(new Font("Arial", Font.BOLD, 18));
+        startBtn.setFont(new Font("Arial MS", Font.BOLD, 18));
         startBtn.setBackground(new Color(76, 175, 80));
         startBtn.setForeground(Color.WHITE);
         startBtn.setFocusPainted(false);
@@ -587,7 +584,7 @@ public class VocalTrainer extends JFrame {
         controlPanel.add(startBtn);
 
         stopBtn = new JButton("⏹️ " + tr("buttons.stop"));
-        stopBtn.setFont(new Font("Arial", Font.BOLD, 18));
+        stopBtn.setFont(new Font("Arial MS", Font.BOLD, 18));
         stopBtn.setBackground(new Color(244, 67, 54));
         stopBtn.setForeground(Color.WHITE);
         stopBtn.setFocusPainted(false);
