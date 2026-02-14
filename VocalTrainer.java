@@ -197,30 +197,37 @@ public class VocalTrainer extends JFrame {
         title.setBorder(BorderFactory.createEmptyBorder(10, 0, 10, 0));
         topPanel.add(title, BorderLayout.NORTH);
 
-        // Панель кнопок (настройки и виртуальное пианино)
-        JPanel buttonPanel = new JPanel(new FlowLayout(FlowLayout.CENTER, 20, 5));
-        buttonPanel.setBackground(new Color(26, 26, 26));
+        // Компактная панель с иконками
+        JPanel iconPanel = new JPanel(new FlowLayout(FlowLayout.RIGHT, 5, 0));
+        iconPanel.setBackground(new Color(26, 26, 26));
+        iconPanel.setBorder(BorderFactory.createEmptyBorder(0, 0, 5, 10));
 
-        toggleSettingsBtn = new JButton("⚙️ Настройки");
-        toggleSettingsBtn.setFont(new Font("Arial", Font.BOLD, 14));
-        toggleSettingsBtn.setBackground(new Color(60, 60, 60));
+        // Кнопка настроек с иконкой
+        toggleSettingsBtn = new JButton("⚙️");
+        toggleSettingsBtn.setFont(new Font("Segoe UI", Font.PLAIN, 20));
+        toggleSettingsBtn.setToolTipText("Показать/скрыть настройки");
+        toggleSettingsBtn.setBackground(new Color(70, 70, 70));
         toggleSettingsBtn.setForeground(Color.WHITE);
         toggleSettingsBtn.setFocusPainted(false);
+        toggleSettingsBtn.setPreferredSize(new Dimension(40, 40));
         toggleSettingsBtn.addActionListener(e -> {
             settingsPanel.setVisible(!settingsPanel.isVisible());
-            toggleSettingsBtn.setText(settingsPanel.isVisible() ? "▲ Скрыть настройки" : "⚙️ Настройки");
+            toggleSettingsBtn.setToolTipText(settingsPanel.isVisible() ? "Скрыть настройки" : "Показать настройки");
         });
-        buttonPanel.add(toggleSettingsBtn);
+        iconPanel.add(toggleSettingsBtn);
 
-        virtualPianoBtn = new JButton("🎹 Виртуальное пианино");
-        virtualPianoBtn.setFont(new Font("Arial", Font.BOLD, 14));
-        virtualPianoBtn.setBackground(new Color(60, 60, 60));
+        // Кнопка виртуального пианино с иконкой
+        virtualPianoBtn = new JButton("🎹");
+        virtualPianoBtn.setFont(new Font("Segoe UI", Font.PLAIN, 20));
+        virtualPianoBtn.setToolTipText("Открыть виртуальное пианино");
+        virtualPianoBtn.setBackground(new Color(70, 70, 70));
         virtualPianoBtn.setForeground(Color.WHITE);
         virtualPianoBtn.setFocusPainted(false);
+        virtualPianoBtn.setPreferredSize(new Dimension(40, 40));
         virtualPianoBtn.addActionListener(e -> showVirtualPiano());
-        buttonPanel.add(virtualPianoBtn);
+        iconPanel.add(virtualPianoBtn);
 
-        topPanel.add(buttonPanel, BorderLayout.SOUTH);
+        topPanel.add(iconPanel, BorderLayout.SOUTH);
 
         add(topPanel, BorderLayout.NORTH);
 
@@ -881,11 +888,12 @@ public class VocalTrainer extends JFrame {
         pianoPanel.repaint();
 
         SwingUtilities.invokeLater(() -> {
-            midiNoteLabel.setText("—");
-            midiVelocityLabel.setText("громкость: —");
-            vocalLabel.setText("—");
-            targetLabel.setText("—");
-            deviationLabel.setText("—");
+            // Защита от NullPointerException (на случай, если компоненты ещё не созданы)
+            if (midiNoteLabel != null) midiNoteLabel.setText("—");
+            if (midiVelocityLabel != null) midiVelocityLabel.setText("громкость: —");
+            if (vocalLabel != null) vocalLabel.setText("—");
+            if (targetLabel != null) targetLabel.setText("—");
+            if (deviationLabel != null) deviationLabel.setText("—");
         });
 
         startBtn.setEnabled(true);
@@ -948,8 +956,8 @@ public class VocalTrainer extends JFrame {
                         if (autoScrollEnabled) {
                             targetCenter = note;
                         }
-                        midiNoteLabel.setText(noteToName(note));
-                        midiVelocityLabel.setText("громкость: " + velocity);
+                        if (midiNoteLabel != null) midiNoteLabel.setText(noteToName(note));
+                        if (midiVelocityLabel != null) midiVelocityLabel.setText("громкость: " + velocity);
                         logMidi("🎹 NOTE ON: " + noteToName(note) + " (MIDI " + note + "), velocity=" + velocity);
                     });
                 } else if (command == ShortMessage.NOTE_OFF ||
@@ -958,8 +966,8 @@ public class VocalTrainer extends JFrame {
                         SwingUtilities.invokeLater(() -> {
                             currentMidiNote = null;
                             currentMidiVelocity = null;
-                            midiNoteLabel.setText("—");
-                            midiVelocityLabel.setText("громкость: —");
+                            if (midiNoteLabel != null) midiNoteLabel.setText("—");
+                            if (midiVelocityLabel != null) midiVelocityLabel.setText("громкость: —");
                         });
                     }
                     logMidi("🎹 NOTE OFF: " + noteToName(note) + " (MIDI " + note + ")");
@@ -973,8 +981,8 @@ public class VocalTrainer extends JFrame {
 
     // ==================== ВСПОМОГАТЕЛЬНЫЕ МЕТОДЫ ====================
     private void updateIndicators() {
-        vocalLabel.setText(currentVocalNote);
-        targetLabel.setText(currentMidiNote == null ? "—" : noteToName(currentMidiNote));
+        if (vocalLabel != null) vocalLabel.setText(currentVocalNote);
+        if (targetLabel != null) targetLabel.setText(currentMidiNote == null ? "—" : noteToName(currentMidiNote));
 
         if (currentPitchMidi != null && currentMidiNote != null) {
             float cents = (currentPitchMidi - currentMidiNote) * 100;
@@ -990,11 +998,15 @@ public class VocalTrainer extends JFrame {
                 symbol = "✗";
                 color = Color.RED;
             }
-            deviationLabel.setText(String.format("%s %+.0f¢", symbol, cents));
-            deviationLabel.setForeground(color);
+            if (deviationLabel != null) {
+                deviationLabel.setText(String.format("%s %+.0f¢", symbol, cents));
+                deviationLabel.setForeground(color);
+            }
         } else {
-            deviationLabel.setText("—");
-            deviationLabel.setForeground(new Color(136, 136, 136));
+            if (deviationLabel != null) {
+                deviationLabel.setText("—");
+                deviationLabel.setForeground(new Color(136, 136, 136));
+            }
         }
     }
 
@@ -1008,9 +1020,11 @@ public class VocalTrainer extends JFrame {
 
     private void logMidi(String message) {
         SwingUtilities.invokeLater(() -> {
-            String time = String.format("[%tT]", System.currentTimeMillis());
-            midiLogArea.append(time + " " + message + "\n");
-            midiLogArea.setCaretPosition(midiLogArea.getDocument().getLength());
+            if (midiLogArea != null) {
+                String time = String.format("[%tT]", System.currentTimeMillis());
+                midiLogArea.append(time + " " + message + "\n");
+                midiLogArea.setCaretPosition(midiLogArea.getDocument().getLength());
+            }
             System.out.println("MIDI LOG: " + message);
         });
     }
@@ -1173,7 +1187,7 @@ public class VocalTrainer extends JFrame {
 }
 
 // =====================================================================
-// Виртуальная пианино-клавиатура
+// Виртуальная пианино-клавиатура (исправленная)
 // =====================================================================
 class VirtualPianoFrame extends JFrame {
     private final VocalTrainer parent;
@@ -1223,6 +1237,7 @@ class VirtualPianoFrame extends JFrame {
             }
         });
         setFocusable(true);
+        requestFocusInWindow();
     }
 
     public void setOctave(int octave) {
@@ -1241,10 +1256,14 @@ class VirtualPianoPanel extends JPanel {
     private final int blackKeyWidth = 30;
     private final int blackKeyHeight = 90;
 
+    // Маппинг клавиш компьютера на индексы клавиш
     private static final char[] whiteKeyChars = {'a', 's', 'd', 'f', 'g', 'h', 'j', 'k', 'l', ';', '\''};
     private static final char[] blackKeyChars = {'w', 'e', 't', 'y', 'u'};
-    private static final int[] blackKeyOffsets = {1, 3, 6, 8, 10};
 
+    // Массив для хранения X-координат чёрных клавиш
+    private final int[] blackXPositions = new int[blackKeys];
+
+    // Состояния нажатия
     private final boolean[] whitePressed = new boolean[whiteKeys];
     private final boolean[] blackPressed = new boolean[blackKeys];
 
@@ -1253,6 +1272,25 @@ class VirtualPianoPanel extends JPanel {
         setPreferredSize(new Dimension(whiteKeys * whiteKeyWidth, whiteKeyHeight + 30));
         setBackground(Color.DARK_GRAY);
         setFocusable(true);
+
+        // Вычисляем позиции чёрных клавиш (для двух октав)
+        // В каждой октаве 5 чёрных клавиш: после C (индекс 0), после D (1), после F (3), после G (4), после A (5)
+        for (int oct = 0; oct < 2; oct++) {
+            int baseWhite = oct * 7; // индекс первой белой клавиши в октаве
+            int[] offsets = {1, 3, 6, 8, 10}; // смещения в полутонах
+            for (int i = 0; i < 5; i++) {
+                int blackIdx = oct * 5 + i;
+                // белая клавиша, после которой идёт чёрная:
+                int whiteIndex;
+                if (i == 0) whiteIndex = baseWhite;      // после C
+                else if (i == 1) whiteIndex = baseWhite + 1; // после D
+                else if (i == 2) whiteIndex = baseWhite + 3; // после F
+                else if (i == 3) whiteIndex = baseWhite + 4; // после G
+                else whiteIndex = baseWhite + 5;            // после A
+                blackXPositions[blackIdx] = (whiteIndex + 1) * whiteKeyWidth - blackKeyWidth / 2;
+            }
+        }
+
         addMouseListener(new MouseAdapter() {
             @Override
             public void mousePressed(MouseEvent e) {
@@ -1271,48 +1309,92 @@ class VirtualPianoPanel extends JPanel {
     }
 
     private int getMidiNoteFromPos(int x, int y) {
-        int whiteIndex = x / whiteKeyWidth;
-        if (whiteIndex >= whiteKeys) return -1;
-        if (y < blackKeyHeight) {
-            for (int i = 0; i < blackKeys; i++) {
-                int blackX = (blackKeyOffsets[i] + 1) * whiteKeyWidth - blackKeyWidth / 2;
-                if (x >= blackX && x < blackX + blackKeyWidth) {
-                    return getMidiForBlackKey(i);
-                }
+        // Сначала проверим, не попали ли на чёрную клавишу
+        for (int i = 0; i < blackKeys; i++) {
+            if (x >= blackXPositions[i] && x < blackXPositions[i] + blackKeyWidth && y < blackKeyHeight) {
+                return getMidiForBlackKey(i);
             }
         }
-        return getMidiForWhiteKey(whiteIndex);
+        // Иначе определяем белую клавишу
+        int whiteIndex = x / whiteKeyWidth;
+        if (whiteIndex >= 0 && whiteIndex < whiteKeys) {
+            return getMidiForWhiteKey(whiteIndex);
+        }
+        return -1;
     }
 
     private int getMidiForWhiteKey(int index) {
-        int noteInOctave = 0;
-        if (index % 7 == 0) noteInOctave = 0; // C
-        else if (index % 7 == 1) noteInOctave = 2; // D
-        else if (index % 7 == 2) noteInOctave = 4; // E
-        else if (index % 7 == 3) noteInOctave = 5; // F
-        else if (index % 7 == 4) noteInOctave = 7; // G
-        else if (index % 7 == 5) noteInOctave = 9; // A
-        else if (index % 7 == 6) noteInOctave = 11; // B
-        int octaveOffset = octave + (index / 7);
+        // index: 0..13
+        int noteInOctave;
+        int octaveOffset;
+        if (index < 7) {
+            // первая октава
+            octaveOffset = octave;
+            switch (index % 7) {
+                case 0: noteInOctave = 0; break; // C
+                case 1: noteInOctave = 2; break; // D
+                case 2: noteInOctave = 4; break; // E
+                case 3: noteInOctave = 5; break; // F
+                case 4: noteInOctave = 7; break; // G
+                case 5: noteInOctave = 9; break; // A
+                case 6: noteInOctave = 11; break; // B
+                default: noteInOctave = 0;
+            }
+        } else {
+            // вторая октава
+            octaveOffset = octave + 1;
+            switch ((index - 7) % 7) {
+                case 0: noteInOctave = 0; break;
+                case 1: noteInOctave = 2; break;
+                case 2: noteInOctave = 4; break;
+                case 3: noteInOctave = 5; break;
+                case 4: noteInOctave = 7; break;
+                case 5: noteInOctave = 9; break;
+                case 6: noteInOctave = 11; break;
+                default: noteInOctave = 0;
+            }
+        }
         return octaveOffset * 12 + noteInOctave;
     }
 
     private int getMidiForBlackKey(int index) {
-        int[] offsets = {1, 3, 6, 8, 10};
-        int noteInOctave = offsets[index];
-        int whiteBase = 0;
-        if (index == 0) whiteBase = 0;
-        else if (index == 1) whiteBase = 1;
-        else if (index == 2) whiteBase = 3;
-        else if (index == 3) whiteBase = 4;
-        else if (index == 4) whiteBase = 5;
-        int octaveOffset = octave + (whiteBase / 7);
+        // index: 0..9
+        int noteInOctave;
+        int octaveOffset;
+        int localIdx = index % 5; // 0..4 внутри октавы
+        if (index < 5) {
+            octaveOffset = octave;
+        } else {
+            octaveOffset = octave + 1;
+        }
+        switch (localIdx) {
+            case 0: noteInOctave = 1; break; // C#
+            case 1: noteInOctave = 3; break; // D#
+            case 2: noteInOctave = 6; break; // F#
+            case 3: noteInOctave = 8; break; // G#
+            case 4: noteInOctave = 10; break; // A#
+            default: noteInOctave = 0;
+        }
         return octaveOffset * 12 + noteInOctave;
     }
 
     private void handleMousePress(int x, int y, boolean press) {
         int note = getMidiNoteFromPos(x, y);
         if (note != -1) {
+            // Определяем, какая клавиша нажата, чтобы обновить состояние
+            boolean found = false;
+            for (int i = 0; i < blackKeys && !found; i++) {
+                if (x >= blackXPositions[i] && x < blackXPositions[i] + blackKeyWidth && y < blackKeyHeight) {
+                    blackPressed[i] = press;
+                    found = true;
+                }
+            }
+            if (!found) {
+                int whiteIndex = x / whiteKeyWidth;
+                if (whiteIndex >= 0 && whiteIndex < whiteKeys) {
+                    whitePressed[whiteIndex] = press;
+                }
+            }
             sendNote(note, press ? 100 : 0);
             repaint();
         }
@@ -1320,7 +1402,8 @@ class VirtualPianoPanel extends JPanel {
 
     public void handleKeyPress(KeyEvent e) {
         char key = e.getKeyChar();
-        for (int i = 0; i < whiteKeyChars.length; i++) {
+        // Белые клавиши
+        for (int i = 0; i < whiteKeyChars.length && i < whiteKeys; i++) {
             if (key == whiteKeyChars[i]) {
                 if (!whitePressed[i]) {
                     whitePressed[i] = true;
@@ -1330,8 +1413,10 @@ class VirtualPianoPanel extends JPanel {
                 break;
             }
         }
+        // Чёрные клавиши
         for (int i = 0; i < blackKeyChars.length; i++) {
             if (key == blackKeyChars[i]) {
+                // Нажата чёрная клавиша в первой октаве (индексы 0-4)
                 if (!blackPressed[i]) {
                     blackPressed[i] = true;
                     int note = getMidiForBlackKey(i);
@@ -1340,6 +1425,7 @@ class VirtualPianoPanel extends JPanel {
                 break;
             }
         }
+        // Смена октавы
         if (e.getKeyCode() == KeyEvent.VK_Z) {
             if (octave > 0) {
                 octave--;
@@ -1357,7 +1443,7 @@ class VirtualPianoPanel extends JPanel {
 
     public void handleKeyRelease(KeyEvent e) {
         char key = e.getKeyChar();
-        for (int i = 0; i < whiteKeyChars.length; i++) {
+        for (int i = 0; i < whiteKeyChars.length && i < whiteKeys; i++) {
             if (key == whiteKeyChars[i]) {
                 if (whitePressed[i]) {
                     whitePressed[i] = false;
@@ -1380,7 +1466,6 @@ class VirtualPianoPanel extends JPanel {
     }
 
     private void sendNote(int note, int velocity) {
-        // Используем публичные методы доступа
         Receiver router = parent.getMidiRouter();
         if (router != null) {
             try {
@@ -1418,9 +1503,10 @@ class VirtualPianoPanel extends JPanel {
         Graphics2D g2 = (Graphics2D) g;
         g2.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);
 
+        // Рисуем белые клавиши
         for (int i = 0; i < whiteKeys; i++) {
             int x = i * whiteKeyWidth;
-            g2.setColor(whitePressed[i] ? Color.LIGHT_GRAY : Color.WHITE);
+            g2.setColor(whitePressed[i] ? new Color(200, 200, 200) : Color.WHITE);
             g2.fillRect(x, 0, whiteKeyWidth - 1, whiteKeyHeight);
             g2.setColor(Color.BLACK);
             g2.drawRect(x, 0, whiteKeyWidth - 1, whiteKeyHeight);
@@ -1431,14 +1517,9 @@ class VirtualPianoPanel extends JPanel {
             g2.drawString(noteName, x + 5, whiteKeyHeight - 10);
         }
 
+        // Рисуем чёрные клавиши
         for (int i = 0; i < blackKeys; i++) {
-            int whiteBase = 0;
-            if (i == 0) whiteBase = 0;
-            else if (i == 1) whiteBase = 1;
-            else if (i == 2) whiteBase = 3;
-            else if (i == 3) whiteBase = 4;
-            else if (i == 4) whiteBase = 5;
-            int x = (whiteBase + 1) * whiteKeyWidth - blackKeyWidth / 2;
+            int x = blackXPositions[i];
             g2.setColor(blackPressed[i] ? Color.DARK_GRAY : Color.BLACK);
             g2.fillRect(x, 0, blackKeyWidth, blackKeyHeight);
             g2.setColor(Color.WHITE);
