@@ -197,19 +197,20 @@ public class VocalTrainer extends JFrame {
         title.setBorder(BorderFactory.createEmptyBorder(10, 0, 10, 0));
         topPanel.add(title, BorderLayout.NORTH);
 
-        // Компактная панель с иконками (теперь с контрастными кнопками)
+        // Компактная панель с иконками (контрастные кнопки)
         JPanel iconPanel = new JPanel(new FlowLayout(FlowLayout.RIGHT, 5, 0));
         iconPanel.setBackground(new Color(26, 26, 26));
         iconPanel.setBorder(BorderFactory.createEmptyBorder(0, 0, 5, 10));
 
         // Кнопка настроек с иконкой (светлый фон, тёмный текст)
-        toggleSettingsBtn = new JButton("⚙️");
-        toggleSettingsBtn.setFont(new Font("Segoe UI", Font.PLAIN, 20));
+        toggleSettingsBtn = new JButton("⚙");
+        //toggleSettingsBtn.setFont(new Font("Segoe UI", Font.PLAIN, 18));
+        toggleSettingsBtn.setFont(new Font("Arial MS", Font.BOLD, 16));
         toggleSettingsBtn.setToolTipText("Показать/скрыть настройки");
-        toggleSettingsBtn.setBackground(new Color(220, 220, 220)); // светлый фон
-        toggleSettingsBtn.setForeground(new Color(30, 30, 30));    // тёмный текст
+        toggleSettingsBtn.setBackground(new Color(220, 220, 220));
+        toggleSettingsBtn.setForeground(new Color(30, 30, 30));
         toggleSettingsBtn.setFocusPainted(false);
-        toggleSettingsBtn.setPreferredSize(new Dimension(40, 40));
+        toggleSettingsBtn.setPreferredSize(new Dimension(60, 40));
         toggleSettingsBtn.addActionListener(e -> {
             settingsPanel.setVisible(!settingsPanel.isVisible());
             toggleSettingsBtn.setToolTipText(settingsPanel.isVisible() ? "Скрыть настройки" : "Показать настройки");
@@ -217,13 +218,13 @@ public class VocalTrainer extends JFrame {
         iconPanel.add(toggleSettingsBtn);
 
         // Кнопка виртуального пианино с иконкой (светлый фон, тёмный текст)
-        virtualPianoBtn = new JButton("🎹");
-        virtualPianoBtn.setFont(new Font("Segoe UI", Font.PLAIN, 20));
+        virtualPianoBtn = new JButton("♫");
+        virtualPianoBtn.setFont(new Font("Arial MS", Font.PLAIN, 16));
         virtualPianoBtn.setToolTipText("Открыть виртуальное пианино");
         virtualPianoBtn.setBackground(new Color(220, 220, 220));
         virtualPianoBtn.setForeground(new Color(30, 30, 30));
         virtualPianoBtn.setFocusPainted(false);
-        virtualPianoBtn.setPreferredSize(new Dimension(40, 40));
+        virtualPianoBtn.setPreferredSize(new Dimension(60, 40));
         virtualPianoBtn.addActionListener(e -> showVirtualPiano());
         iconPanel.add(virtualPianoBtn);
 
@@ -1186,13 +1187,14 @@ public class VocalTrainer extends JFrame {
 }
 
 // =====================================================================
-// Виртуальная пианино-клавиатура (исправленная и улучшенная)
+// Виртуальная пианино-клавиатура (управление октавой только с клавиатуры)
 // =====================================================================
 class VirtualPianoFrame extends JFrame {
     private final VocalTrainer parent;
     private VirtualPianoPanel pianoPanel;
     private int octave = 4;
     private JCheckBox alwaysOnTopCheck;
+    private JLabel infoLabel; // для отображения текущей октавы
 
     public VirtualPianoFrame(VocalTrainer parent) {
         super("Виртуальное пианино");
@@ -1204,45 +1206,35 @@ class VirtualPianoFrame extends JFrame {
         pianoPanel = new VirtualPianoPanel(parent);
         add(pianoPanel, BorderLayout.CENTER);
 
-        // Нижняя панель с элементами управления
+        // Нижняя панель с информацией о горячих клавишах и кнопкой "Поверх всех"
         JPanel controlPanel = new JPanel(new BorderLayout());
         controlPanel.setBackground(new Color(60, 60, 60));
 
-        JPanel octavePanel = new JPanel(new FlowLayout());
-        octavePanel.setBackground(new Color(60, 60, 60));
-        JButton octDown = new JButton("Октава -");
-        octDown.addActionListener(e -> {
-            if (octave > 0) {
-                octave--;
-                pianoPanel.setOctave(octave);
-                parent.setVirtualOctave(octave);
-            }
-        });
-        JButton octUp = new JButton("Октава +");
-        octUp.addActionListener(e -> {
-            if (octave < 8) {
-                octave++;
-                pianoPanel.setOctave(octave);
-                parent.setVirtualOctave(octave);
-            }
-        });
-        octavePanel.add(octDown);
-        octavePanel.add(octUp);
+        // Текстовая метка с информацией о смене октавы
+        infoLabel = new JLabel("Октава: текущая = " + octave +
+                "   Смена октавы: + / - (на цифровой клавиатуре) или = / -");
+        infoLabel.setForeground(Color.WHITE);
+        infoLabel.setFont(new Font("Arial", Font.PLAIN, 12));
+        controlPanel.add(infoLabel, BorderLayout.WEST);
 
         JPanel topPanel = new JPanel(new FlowLayout(FlowLayout.RIGHT));
         topPanel.setBackground(new Color(60, 60, 60));
         alwaysOnTopCheck = new JCheckBox("📌 Поверх всех");
         alwaysOnTopCheck.setForeground(Color.WHITE);
         alwaysOnTopCheck.setBackground(new Color(60, 60, 60));
-        alwaysOnTopCheck.addActionListener(e -> {
-            setAlwaysOnTop(alwaysOnTopCheck.isSelected());
-        });
+        alwaysOnTopCheck.addActionListener(e -> setAlwaysOnTop(alwaysOnTopCheck.isSelected()));
         topPanel.add(alwaysOnTopCheck);
 
-        controlPanel.add(octavePanel, BorderLayout.WEST);
         controlPanel.add(topPanel, BorderLayout.EAST);
-
         add(controlPanel, BorderLayout.SOUTH);
+
+        // Возвращаем фокус на панель пианино при клике мышью
+        pianoPanel.addMouseListener(new MouseAdapter() {
+            @Override
+            public void mouseClicked(MouseEvent e) {
+                pianoPanel.requestFocusInWindow();
+            }
+        });
 
         addKeyListener(new KeyAdapter() {
             @Override
@@ -1261,6 +1253,9 @@ class VirtualPianoFrame extends JFrame {
     public void setOctave(int octave) {
         this.octave = octave;
         pianoPanel.setOctave(octave);
+        // Обновляем текст в нижней панели
+        infoLabel.setText("Октава: текущая = " + octave +
+                "   Смена октавы: + / - (на цифровой клавиатуре) или = / -");
     }
 }
 
@@ -1294,7 +1289,6 @@ class VirtualPianoPanel extends JPanel {
         // Вычисляем позиции чёрных клавиш (для двух октав)
         for (int oct = 0; oct < 2; oct++) {
             int baseWhite = oct * 7;
-            int[] offsets = {1, 3, 6, 8, 10};
             for (int i = 0; i < 5; i++) {
                 int blackIdx = oct * 5 + i;
                 int whiteIndex;
@@ -1430,6 +1424,8 @@ class VirtualPianoPanel extends JPanel {
 
     public void handleKeyPress(KeyEvent e) {
         char key = e.getKeyChar();
+        int keyCode = e.getKeyCode();
+
         // Белые клавиши
         for (int i = 0; i < whiteKeyChars.length && i < whiteKeys; i++) {
             if (key == whiteKeyChars[i]) {
@@ -1454,14 +1450,27 @@ class VirtualPianoPanel extends JPanel {
                 break;
             }
         }
-        // Смена октавы
-        if (e.getKeyCode() == KeyEvent.VK_Z) {
+        // Смена октавы: + и -
+        if (keyCode == KeyEvent.VK_PLUS || keyCode == KeyEvent.VK_ADD ||
+                (keyCode == KeyEvent.VK_EQUALS && e.isShiftDown())) {
+            if (octave < 8) {
+                octave++;
+                setOctave(octave);
+                parent.setVirtualOctave(octave);
+            }
+        } else if (keyCode == KeyEvent.VK_MINUS || keyCode == KeyEvent.VK_SUBTRACT) {
             if (octave > 0) {
                 octave--;
                 setOctave(octave);
                 parent.setVirtualOctave(octave);
             }
-        } else if (e.getKeyCode() == KeyEvent.VK_X) {
+        } else if (keyCode == KeyEvent.VK_Z) { // старые клавиши для совместимости
+            if (octave > 0) {
+                octave--;
+                setOctave(octave);
+                parent.setVirtualOctave(octave);
+            }
+        } else if (keyCode == KeyEvent.VK_X) {
             if (octave < 8) {
                 octave++;
                 setOctave(octave);
