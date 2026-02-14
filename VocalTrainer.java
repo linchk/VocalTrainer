@@ -30,6 +30,7 @@ public class VocalTrainer extends JFrame {
     private static final String KEY_AUTO_SCROLL       = "auto_scroll";
     private static final String KEY_OUTPUT_MODE       = "output_mode";
     private static final String KEY_DETAILED_LOG      = "detailed_log";
+    private static final String KEY_VIRTUAL_OCTAVE    = "virtual_octave";
 
     // -------- ПАРАМЕТРЫ АУДИО --------
     private static final float SAMPLE_RATE = 44100.0f;
@@ -69,6 +70,10 @@ public class VocalTrainer extends JFrame {
     private double targetCenter = 60.0;
     private volatile boolean autoScrollEnabled = true;
 
+    // Виртуальная клавиатура
+    private VirtualPianoFrame virtualPianoFrame;
+    private int virtualOctave = 4; // начальная октава (C4 = 60)
+
     // GUI
     private JComboBox<String> audioInputCombo;
     private JComboBox<String> audioOutputCombo;
@@ -78,7 +83,7 @@ public class VocalTrainer extends JFrame {
     private JRadioButton synthOutRadio;
     private ButtonGroup outGroup;
     private JCheckBox autoScrollCheck;
-    private JCheckBox detailedLogCheck;   // новый флажок
+    private JCheckBox detailedLogCheck;
     private JLabel midiNoteLabel;
     private JLabel midiVelocityLabel;
     private JLabel vocalLabel;
@@ -87,6 +92,7 @@ public class VocalTrainer extends JFrame {
     private JTextArea midiLogArea;
     private JButton startBtn, stopBtn;
     private JButton toggleSettingsBtn;
+    private JButton virtualPianoBtn;
     private JPanel settingsPanel;
 
     private Timer repaintTimer;
@@ -125,6 +131,7 @@ public class VocalTrainer extends JFrame {
         addWindowListener(new WindowAdapter() {
             @Override
             public void windowClosing(WindowEvent e) {
+                if (virtualPianoFrame != null) virtualPianoFrame.dispose();
                 stopProcessing();
                 saveSettings();
                 closeAllDevices();
@@ -132,6 +139,18 @@ public class VocalTrainer extends JFrame {
         });
     }
 
+    // -------- Публичные методы доступа для виртуальной клавиатуры --------
+    public Receiver getMidiRouter() { return midiRouter; }
+    public Receiver getSynthReceiver() { return synthReceiver; }
+    public boolean isRunning() { return isRunning; }
+    public String noteToName(int midi) {
+        if (midi < 0 || midi > 127) return "?";
+        String[] notes = {"C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"};
+        int octave = midi / 12 - 1;
+        return notes[midi % 12] + octave;
+    }
+
+    // -----------------------------------------------------------------------
     private void closeAllDevices() {
         if (synthesizer != null) synthesizer.close();
         if (midiOutputDevice != null) midiOutputDevice.close();
@@ -178,7 +197,10 @@ public class VocalTrainer extends JFrame {
         title.setBorder(BorderFactory.createEmptyBorder(10, 0, 10, 0));
         topPanel.add(title, BorderLayout.NORTH);
 
-        // Кнопка сворачивания настроек
+        // Панель кнопок (настройки и виртуальное пианино)
+        JPanel buttonPanel = new JPanel(new FlowLayout(FlowLayout.CENTER, 20, 5));
+        buttonPanel.setBackground(new Color(26, 26, 26));
+
         toggleSettingsBtn = new JButton("⚙️ Настройки");
         toggleSettingsBtn.setFont(new Font("Arial", Font.BOLD, 14));
         toggleSettingsBtn.setBackground(new Color(60, 60, 60));
@@ -188,7 +210,17 @@ public class VocalTrainer extends JFrame {
             settingsPanel.setVisible(!settingsPanel.isVisible());
             toggleSettingsBtn.setText(settingsPanel.isVisible() ? "▲ Скрыть настройки" : "⚙️ Настройки");
         });
-        topPanel.add(toggleSettingsBtn, BorderLayout.SOUTH);
+        buttonPanel.add(toggleSettingsBtn);
+
+        virtualPianoBtn = new JButton("🎹 Виртуальное пианино");
+        virtualPianoBtn.setFont(new Font("Arial", Font.BOLD, 14));
+        virtualPianoBtn.setBackground(new Color(60, 60, 60));
+        virtualPianoBtn.setForeground(Color.WHITE);
+        virtualPianoBtn.setFocusPainted(false);
+        virtualPianoBtn.addActionListener(e -> showVirtualPiano());
+        buttonPanel.add(virtualPianoBtn);
+
+        topPanel.add(buttonPanel, BorderLayout.SOUTH);
 
         add(topPanel, BorderLayout.NORTH);
 
@@ -469,6 +501,29 @@ public class VocalTrainer extends JFrame {
     }
 
     // -----------------------------------------------------------------------
+    public int getVirtualOctave() {
+        return virtualOctave;
+    }
+
+    public void setVirtualOctave(int octave) {
+        if (octave >= 0 && octave <= 8) {
+            virtualOctave = octave;
+            saveSettings();
+        }
+    }
+
+    // -----------------------------------------------------------------------
+    private void showVirtualPiano() {
+        if (virtualPianoFrame == null || !virtualPianoFrame.isVisible()) {
+            virtualPianoFrame = new VirtualPianoFrame(this);
+            virtualPianoFrame.setOctave(virtualOctave);
+            virtualPianoFrame.setVisible(true);
+        } else {
+            virtualPianoFrame.toFront();
+        }
+    }
+
+    // -----------------------------------------------------------------------
     private void loadSettings() {
         int savedAudioIn = PREFS.getInt(KEY_INPUT_DEVICE, 0);
         int savedAudioOut = PREFS.getInt(KEY_OUTPUT_DEVICE, 0);
@@ -509,6 +564,8 @@ public class VocalTrainer extends JFrame {
 
         boolean detailedLog = PREFS.getBoolean(KEY_DETAILED_LOG, true);
         detailedLogCheck.setSelected(detailedLog);
+
+        virtualOctave = PREFS.getInt(KEY_VIRTUAL_OCTAVE, 4);
     }
 
     private void saveSettings() {
@@ -523,6 +580,7 @@ public class VocalTrainer extends JFrame {
         PREFS.put(KEY_OUTPUT_MODE, physicalOutRadio.isSelected() ? "physical" : "synth");
         PREFS.putBoolean(KEY_AUTO_SCROLL, autoScrollEnabled);
         PREFS.putBoolean(KEY_DETAILED_LOG, detailedLogCheck.isSelected());
+        PREFS.putInt(KEY_VIRTUAL_OCTAVE, virtualOctave);
     }
 
     // -----------------------------------------------------------------------
@@ -847,7 +905,6 @@ public class VocalTrainer extends JFrame {
 
         @Override
         public void send(MidiMessage message, long timeStamp) {
-            // Логируем входящее сообщение, если включён подробный лог
             boolean detailedLog = detailedLogCheck.isSelected();
             if (detailedLog && message instanceof ShortMessage) {
                 ShortMessage sm = (ShortMessage) message;
@@ -862,7 +919,6 @@ public class VocalTrainer extends JFrame {
                         " note=" + note + " vel=" + velocity);
             }
 
-            // Пересылаем на выход, если есть
             if (isRunning && outputReceiver != null) {
                 try {
                     outputReceiver.send(message, timeStamp);
@@ -879,7 +935,6 @@ public class VocalTrainer extends JFrame {
                 }
             }
 
-            // Обновляем GUI для NOTE_ON/OFF (всегда, независимо от detailedLog)
             if (isRunning && message instanceof ShortMessage) {
                 ShortMessage sm = (ShortMessage) message;
                 int command = sm.getCommand();
@@ -895,7 +950,6 @@ public class VocalTrainer extends JFrame {
                         }
                         midiNoteLabel.setText(noteToName(note));
                         midiVelocityLabel.setText("громкость: " + velocity);
-                        // Логируем кратко, даже если detailedLog выключен, чтобы видеть нажатия
                         logMidi("🎹 NOTE ON: " + noteToName(note) + " (MIDI " + note + "), velocity=" + velocity);
                     });
                 } else if (command == ShortMessage.NOTE_OFF ||
@@ -917,15 +971,7 @@ public class VocalTrainer extends JFrame {
         public void close() {}
     }
 
-    // -----------------------------------------------------------------------
-    private String noteToName(int midi) {
-        if (midi < 0 || midi > 127) return "?";
-        String[] notes = {"C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"};
-        int octave = midi / 12 - 1;
-        return notes[midi % 12] + octave;
-    }
-
-    // -----------------------------------------------------------------------
+    // ==================== ВСПОМОГАТЕЛЬНЫЕ МЕТОДЫ ====================
     private void updateIndicators() {
         vocalLabel.setText(currentVocalNote);
         targetLabel.setText(currentMidiNote == null ? "—" : noteToName(currentMidiNote));
@@ -952,7 +998,6 @@ public class VocalTrainer extends JFrame {
         }
     }
 
-    // -----------------------------------------------------------------------
     private void smoothScroll() {
         if (autoScrollEnabled) {
             viewCenter += (targetCenter - viewCenter) * 0.1;
@@ -961,7 +1006,6 @@ public class VocalTrainer extends JFrame {
         }
     }
 
-    // -----------------------------------------------------------------------
     private void logMidi(String message) {
         SwingUtilities.invokeLater(() -> {
             String time = String.format("[%tT]", System.currentTimeMillis());
@@ -971,7 +1015,7 @@ public class VocalTrainer extends JFrame {
         });
     }
 
-    // -----------------------------------------------------------------------
+    // ==================== ДЕТЕКТОР ВЫСОТЫ ТОНА ====================
     private static class PitchDetector {
         private final float sampleRate;
         PitchDetector(AudioFormat format) { this.sampleRate = format.getSampleRate(); }
@@ -1002,7 +1046,7 @@ public class VocalTrainer extends JFrame {
         }
     }
 
-    // -----------------------------------------------------------------------
+    // ==================== ПОТОК ОБРАБОТКИ АУДИО ====================
     private class AudioProcessor implements Runnable {
         @Override
         public void run() {
@@ -1052,7 +1096,7 @@ public class VocalTrainer extends JFrame {
         PitchPoint(float time, Float pitch) { this.time = time; this.pitch = pitch; }
     }
 
-    // -----------------------------------------------------------------------
+    // ==================== ПАНЕЛЬ ПИАНИНО-РОЛЛА ====================
     private class PianoRollPanel extends JPanel {
         @Override
         protected void paintComponent(Graphics g) {
@@ -1125,5 +1169,289 @@ public class VocalTrainer extends JFrame {
                 g2.drawLine(0, y, w, y);
             }
         }
+    }
+}
+
+// =====================================================================
+// Виртуальная пианино-клавиатура
+// =====================================================================
+class VirtualPianoFrame extends JFrame {
+    private final VocalTrainer parent;
+    private VirtualPianoPanel pianoPanel;
+    private int octave = 4;
+
+    public VirtualPianoFrame(VocalTrainer parent) {
+        super("Виртуальное пианино");
+        this.parent = parent;
+        setDefaultCloseOperation(JFrame.DISPOSE_ON_CLOSE);
+        setSize(800, 300);
+        setLocationRelativeTo(parent);
+
+        pianoPanel = new VirtualPianoPanel(parent);
+        add(pianoPanel, BorderLayout.CENTER);
+
+        JPanel controlPanel = new JPanel();
+        controlPanel.setBackground(new Color(60, 60, 60));
+        JButton octDown = new JButton("Октава -");
+        octDown.addActionListener(e -> {
+            if (octave > 0) {
+                octave--;
+                pianoPanel.setOctave(octave);
+                parent.setVirtualOctave(octave);
+            }
+        });
+        JButton octUp = new JButton("Октава +");
+        octUp.addActionListener(e -> {
+            if (octave < 8) {
+                octave++;
+                pianoPanel.setOctave(octave);
+                parent.setVirtualOctave(octave);
+            }
+        });
+        controlPanel.add(octDown);
+        controlPanel.add(octUp);
+        add(controlPanel, BorderLayout.SOUTH);
+
+        addKeyListener(new KeyAdapter() {
+            @Override
+            public void keyPressed(KeyEvent e) {
+                pianoPanel.handleKeyPress(e);
+            }
+            @Override
+            public void keyReleased(KeyEvent e) {
+                pianoPanel.handleKeyRelease(e);
+            }
+        });
+        setFocusable(true);
+    }
+
+    public void setOctave(int octave) {
+        this.octave = octave;
+        pianoPanel.setOctave(octave);
+    }
+}
+
+class VirtualPianoPanel extends JPanel {
+    private final VocalTrainer parent;
+    private int octave = 4;
+    private final int whiteKeys = 14; // от C до B следующей октавы (2 октавы)
+    private final int blackKeys = 10;
+    private final int whiteKeyWidth = 50;
+    private final int whiteKeyHeight = 150;
+    private final int blackKeyWidth = 30;
+    private final int blackKeyHeight = 90;
+
+    private static final char[] whiteKeyChars = {'a', 's', 'd', 'f', 'g', 'h', 'j', 'k', 'l', ';', '\''};
+    private static final char[] blackKeyChars = {'w', 'e', 't', 'y', 'u'};
+    private static final int[] blackKeyOffsets = {1, 3, 6, 8, 10};
+
+    private final boolean[] whitePressed = new boolean[whiteKeys];
+    private final boolean[] blackPressed = new boolean[blackKeys];
+
+    public VirtualPianoPanel(VocalTrainer parent) {
+        this.parent = parent;
+        setPreferredSize(new Dimension(whiteKeys * whiteKeyWidth, whiteKeyHeight + 30));
+        setBackground(Color.DARK_GRAY);
+        setFocusable(true);
+        addMouseListener(new MouseAdapter() {
+            @Override
+            public void mousePressed(MouseEvent e) {
+                handleMousePress(e.getX(), e.getY(), true);
+            }
+            @Override
+            public void mouseReleased(MouseEvent e) {
+                handleMousePress(e.getX(), e.getY(), false);
+            }
+        });
+    }
+
+    public void setOctave(int octave) {
+        this.octave = octave;
+        repaint();
+    }
+
+    private int getMidiNoteFromPos(int x, int y) {
+        int whiteIndex = x / whiteKeyWidth;
+        if (whiteIndex >= whiteKeys) return -1;
+        if (y < blackKeyHeight) {
+            for (int i = 0; i < blackKeys; i++) {
+                int blackX = (blackKeyOffsets[i] + 1) * whiteKeyWidth - blackKeyWidth / 2;
+                if (x >= blackX && x < blackX + blackKeyWidth) {
+                    return getMidiForBlackKey(i);
+                }
+            }
+        }
+        return getMidiForWhiteKey(whiteIndex);
+    }
+
+    private int getMidiForWhiteKey(int index) {
+        int noteInOctave = 0;
+        if (index % 7 == 0) noteInOctave = 0; // C
+        else if (index % 7 == 1) noteInOctave = 2; // D
+        else if (index % 7 == 2) noteInOctave = 4; // E
+        else if (index % 7 == 3) noteInOctave = 5; // F
+        else if (index % 7 == 4) noteInOctave = 7; // G
+        else if (index % 7 == 5) noteInOctave = 9; // A
+        else if (index % 7 == 6) noteInOctave = 11; // B
+        int octaveOffset = octave + (index / 7);
+        return octaveOffset * 12 + noteInOctave;
+    }
+
+    private int getMidiForBlackKey(int index) {
+        int[] offsets = {1, 3, 6, 8, 10};
+        int noteInOctave = offsets[index];
+        int whiteBase = 0;
+        if (index == 0) whiteBase = 0;
+        else if (index == 1) whiteBase = 1;
+        else if (index == 2) whiteBase = 3;
+        else if (index == 3) whiteBase = 4;
+        else if (index == 4) whiteBase = 5;
+        int octaveOffset = octave + (whiteBase / 7);
+        return octaveOffset * 12 + noteInOctave;
+    }
+
+    private void handleMousePress(int x, int y, boolean press) {
+        int note = getMidiNoteFromPos(x, y);
+        if (note != -1) {
+            sendNote(note, press ? 100 : 0);
+            repaint();
+        }
+    }
+
+    public void handleKeyPress(KeyEvent e) {
+        char key = e.getKeyChar();
+        for (int i = 0; i < whiteKeyChars.length; i++) {
+            if (key == whiteKeyChars[i]) {
+                if (!whitePressed[i]) {
+                    whitePressed[i] = true;
+                    int note = getMidiForWhiteKey(i);
+                    sendNote(note, 100);
+                }
+                break;
+            }
+        }
+        for (int i = 0; i < blackKeyChars.length; i++) {
+            if (key == blackKeyChars[i]) {
+                if (!blackPressed[i]) {
+                    blackPressed[i] = true;
+                    int note = getMidiForBlackKey(i);
+                    sendNote(note, 100);
+                }
+                break;
+            }
+        }
+        if (e.getKeyCode() == KeyEvent.VK_Z) {
+            if (octave > 0) {
+                octave--;
+                parent.setVirtualOctave(octave);
+                repaint();
+            }
+        } else if (e.getKeyCode() == KeyEvent.VK_X) {
+            if (octave < 8) {
+                octave++;
+                parent.setVirtualOctave(octave);
+                repaint();
+            }
+        }
+    }
+
+    public void handleKeyRelease(KeyEvent e) {
+        char key = e.getKeyChar();
+        for (int i = 0; i < whiteKeyChars.length; i++) {
+            if (key == whiteKeyChars[i]) {
+                if (whitePressed[i]) {
+                    whitePressed[i] = false;
+                    int note = getMidiForWhiteKey(i);
+                    sendNote(note, 0);
+                }
+                break;
+            }
+        }
+        for (int i = 0; i < blackKeyChars.length; i++) {
+            if (key == blackKeyChars[i]) {
+                if (blackPressed[i]) {
+                    blackPressed[i] = false;
+                    int note = getMidiForBlackKey(i);
+                    sendNote(note, 0);
+                }
+                break;
+            }
+        }
+    }
+
+    private void sendNote(int note, int velocity) {
+        // Используем публичные методы доступа
+        Receiver router = parent.getMidiRouter();
+        if (router != null) {
+            try {
+                ShortMessage msg = new ShortMessage();
+                if (velocity > 0) {
+                    msg.setMessage(ShortMessage.NOTE_ON, 0, note, velocity);
+                } else {
+                    msg.setMessage(ShortMessage.NOTE_OFF, 0, note, 0);
+                }
+                router.send(msg, -1);
+            } catch (InvalidMidiDataException e) {
+                e.printStackTrace();
+            }
+        } else {
+            Receiver synth = parent.getSynthReceiver();
+            if (synth != null) {
+                try {
+                    ShortMessage msg = new ShortMessage();
+                    if (velocity > 0) {
+                        msg.setMessage(ShortMessage.NOTE_ON, 0, note, velocity);
+                    } else {
+                        msg.setMessage(ShortMessage.NOTE_OFF, 0, note, 0);
+                    }
+                    synth.send(msg, -1);
+                } catch (InvalidMidiDataException e) {
+                    e.printStackTrace();
+                }
+            }
+        }
+    }
+
+    @Override
+    protected void paintComponent(Graphics g) {
+        super.paintComponent(g);
+        Graphics2D g2 = (Graphics2D) g;
+        g2.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);
+
+        for (int i = 0; i < whiteKeys; i++) {
+            int x = i * whiteKeyWidth;
+            g2.setColor(whitePressed[i] ? Color.LIGHT_GRAY : Color.WHITE);
+            g2.fillRect(x, 0, whiteKeyWidth - 1, whiteKeyHeight);
+            g2.setColor(Color.BLACK);
+            g2.drawRect(x, 0, whiteKeyWidth - 1, whiteKeyHeight);
+            int note = getMidiForWhiteKey(i);
+            String noteName = parent.noteToName(note);
+            g2.setColor(Color.BLACK);
+            g2.setFont(new Font("Arial", Font.PLAIN, 12));
+            g2.drawString(noteName, x + 5, whiteKeyHeight - 10);
+        }
+
+        for (int i = 0; i < blackKeys; i++) {
+            int whiteBase = 0;
+            if (i == 0) whiteBase = 0;
+            else if (i == 1) whiteBase = 1;
+            else if (i == 2) whiteBase = 3;
+            else if (i == 3) whiteBase = 4;
+            else if (i == 4) whiteBase = 5;
+            int x = (whiteBase + 1) * whiteKeyWidth - blackKeyWidth / 2;
+            g2.setColor(blackPressed[i] ? Color.DARK_GRAY : Color.BLACK);
+            g2.fillRect(x, 0, blackKeyWidth, blackKeyHeight);
+            g2.setColor(Color.WHITE);
+            g2.drawRect(x, 0, blackKeyWidth, blackKeyHeight);
+            int note = getMidiForBlackKey(i);
+            String noteName = parent.noteToName(note);
+            g2.setColor(Color.WHITE);
+            g2.setFont(new Font("Arial", Font.PLAIN, 10));
+            g2.drawString(noteName, x + 5, blackKeyHeight - 10);
+        }
+
+        g2.setColor(Color.WHITE);
+        g2.setFont(new Font("Arial", Font.BOLD, 16));
+        g2.drawString("Октава: " + octave, 10, whiteKeyHeight + 20);
     }
 }
